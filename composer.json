@@ -1,0 +1,22 @@
+{
+    "name": "pumuckly/testing",
+    "type": "library",
+    "description": "PHP website performance testing tool",
+    "keywords": ["testug", "performance", "php", "website"],
+    "homepage": "https://github.com/pumuckly/testing",
+    "license": "GNU GPLv3.0",
+    "authors": [
+        {
+            "name": "William Eder",
+            "email": "pumuckly@freemail.hu"
+        }
+    ],
+    "require": {
+        "php": ">=8.0",
+        "php-webdriver/webdriver": "^1.12"
+    },
+    "autoload": {
+        "files": [ "autoload.php" ],
+    },
+    "minimum-stability": "dev"
+}
