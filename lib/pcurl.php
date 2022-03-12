@@ -35,7 +35,7 @@ class PCURL {
         $this->_links = [];
     }
 
-    public function getUrl($url) {
+    public function getUrl($url, $exclude=[]) {
         $res = [];
         try {
             $params = ['exception'=>true];
@@ -47,9 +47,9 @@ class PCURL {
 
             $res['base'] = $url;
             $res['links'] = [];
-            $res['data'] = ['start'=>microtime(true),'length'=>0];
+            $res['data'] = ['start'=>microtime(true),'length'=>0,'counts'=>0];
 
-            $content = HTTP::getOtherSiteContent($url, false, $params);
+            $content = HTTP::getOtherSiteContent($url, false, $params, 20);
             $res['timer'] = HTTP::getRunTime($url);
             $res['data']['length'] = strlen($content);
 
@@ -83,12 +83,20 @@ class PCURL {
                         elseif (substr($link,0,6) == 'https:') { /* https link */ }
                         else { $link = $url.'/'.$link; }
                     }
+
+                    if ((!empty($link))&&(ARRAYS::check($exclude))) {
+                        foreach ($exclude as $blocked) {
+                            if (strpos(strtolower($link), strtolower($blocked))!==false) { $link = false; break; }
+                        }
+                    }
+
                     if ((!empty($link))&&(strpos($link,'http')===0)) {
                         if (!array_key_exists($link, $res['links'])) { $res['links'][$link] = $key; }
                     }
                 }
             }
             unset($content);
+            $res['data']['counts'] = count($res['links']);
         }
         catch (\Exception $ex) {
             $res['error'] = $ex->getMessage();
@@ -99,7 +107,7 @@ class PCURL {
     protected function getResultsLength() {
         $res = 0;
         if (!ARRAYS::check($this->_results)) { return $res; }
-        foreach ($this->_results as $result) {
+        foreach ($this->_results as &$result) {
             $length = ARRAYS::get($result, 'length');
             if ((!empty($length))&&($length > 0)) { $res += $length; }
         }
@@ -109,26 +117,46 @@ class PCURL {
     protected function getResultsTiming() {
         $res = 0.0;
         if (!ARRAYS::check($this->_results)) { return $res; }
-        foreach ($this->_results as $result) {
+        foreach ($this->_results as &$result) {
             $timing = ARRAYS::get($result, 'timing');
             if ((!empty($timing))&&($timing > $res)) { $res = $timing; }
         }
         return $res;
     }
 
+    protected function getResultsCount() {
+        $res = 0;
+        if (!ARRAYS::check($this->_results)) { return $res; }
+        foreach ($this->_results as &$result) {
+            $timing = ARRAYS::get($result, 'timing');
+            $length = ARRAYS::get($result, 'length');
+            if ((!empty($timing))&&(!empty($length))&&($timing > 0)&&($length>0)) { $res++; }
+        }
+        return $res;
+    }
+
+    protected function getResultsErrors() {
+        $res = 0;
+        if (!ARRAYS::check($this->_results)) { return $res; }
+        foreach ($this->_results as &$result) {
+            $errors = ARRAYS::get($result, 'errors');
+            if ($errors===true) { $res++; }
+        }
+        return $res;
+    }
+
     protected function haveLink() {
         if (count($this->_links)==0) { return false; }
-        foreach ($this->_links as $key => $data) {
+        foreach ($this->_links as $link => $data) {
             $status = ARRAYS::get($data, 'status');
-            if (!$status) { return $key; }
+            if ($status === false) { return $link; }
         }
         return false;
     }
 
-    public function getLinks(&$links, $base='') {
+    public function getLinks(&$links, $base='', $max_repeat=1) {
         $res = [];
         try {
-
             $this->_results = [];
             $this->_links = [];
             $this->clearThreads();
@@ -144,9 +172,9 @@ class PCURL {
                   }
             }
             while ($link = $this->haveLink()) {
-                $type = ARRAYS::get($this->_links, [$link, 'type']);
                 $this->_links[$link]['status'] = 1;
-                $this->setLinkThread($link, $type);
+                $type = ARRAYS::get($this->_links, [$link, 'type']);
+                $this->setLinkThread($link, $type, $max_repeat);
             }
             $have_thread = $this->waitThreads();
             $this->clearThreads();
@@ -154,7 +182,13 @@ class PCURL {
             $timer += microtime(true);
 
             $res['timer'] = $timer;
-            $res['data'] = ['start'=>$start, 'length'=>$this->getResultsLength(), 'maxtime'=>$this->getResultsTiming()];
+            $res['data'] = [
+                  'start'=>$start,
+                  'length'=>$this->getResultsLength(),
+                  'maxtime'=>$this->getResultsTiming(),
+                  'counts'=>$this->getResultsCount(),
+                  'errors'=>$this->getResultsErrors(),
+            ];
         }
         catch (\Exception $ex) { $res['error'] = $ex->getMessage(); }
         return $res;
@@ -180,6 +214,7 @@ class PCURL {
         if (array_key_exists($url, $this->_links)) {
             $this->_links[$url]['status'] = 2;
         }
+
         $links = ARRAYS::get($result, 'links');
         if (ARRAYS::check($links)) {
             foreach ($links as $link) {
@@ -192,13 +227,12 @@ class PCURL {
         $this->_results[] = $result;
     }
 
-    protected function waitThreads($limit = 0, $timeout = 30) {
+    protected function waitThreads($limit = 0, $timeout = 60) {
         if (count($this->_threads) >= $limit) {
             $watchdog = 1000000*$timeout; //default 30 secound
             while ((count($this->_threads)>0)&&(count($this->_threads) >= $limit)&&($watchdog>0)) {
                 $ts = 0.0-microtime(true);
                 foreach ($this->_threads as $i => &$thread) {
-                    //TODO: handle forked threads
                     if ($thread['future'] === false) {
                         unset($this->_threads[$i]);
                         continue;
@@ -219,7 +253,7 @@ class PCURL {
         return count($this->_threads);
     }
 
-    protected function setLinkThread($link, $type) {
+    protected function setLinkThread($link, $type, $max_repeat=1) {
         //wait for freeing a thread
         $this->waitThreads($this->threads_max);
 
@@ -232,13 +266,12 @@ class PCURL {
               return call_user_func_array('Pumuckly\\Testing\\HTTP::getUrlStat', func_get_args());
         };
 
-        $this->_threads[$i] = ['runtime' => new \parallel\Runtime(), 'future'=>false, 'started'=>false];
+        $this->_threads[$i] = ['runtime' => new \parallel\Runtime(), 'future'=>false];
         $this->_threads[$i]['future'] = 
               $this->_threads[$i]['runtime']->run($callfunc, [
                     'thread'=>['id'=>$i, 'parent'=>getmypid(), 'log'=>FILE::logGetParam()], 
-                    'data'=>['url'=>$link, 'type'=>$type, 'params'=>$params]
+                    'data'=>['url'=>$link, 'type'=>$type, 'max_repeat'=>$max_repeat, 'params'=>$params]
               ]);
-        $this->_threads[$i]['started'] = true;
     }
 
 }

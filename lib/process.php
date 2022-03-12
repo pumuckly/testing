@@ -305,8 +305,10 @@ return false;
 
             $base = ARRAYS::get($params, 'base');
             if (empty($base)) { throw new \Exception("No base URL specified!"); }
+            $exclude = ARRAYS::get($params, 'exclude');
+            if (!ARRAYS::check($exclude)) { $exclude = []; }
 
-            $res = $engine->getUrl($base);
+            $res = $engine->getUrl($base, $exclude);
         }
         catch (\Exception $ex) { $res['error'] = "Error: ".$ex->getMessage(); }
         return $res;
@@ -322,13 +324,15 @@ return false;
             $base = ARRAYS::get($params, 'base');
             if (empty($base)) { $base = ARRAYS::get($last, 'base'); }
             if (empty($base)) { throw new \Exception("No base URL specified!"); }
+            $max_repeat = ARRAYS::get($params, 'max_repeat');
+            if (empty($max_repeat)) { $max_repeat = 1; }
 
             $links = ARRAYS::get($params, 'links');
             if ($links === 'last') {
                 $links = ARRAYS::get($last, 'links');
             }
             if (!ARRAYS::check($links)) { throw new \Exception('No more links'); }
-            $res = $engine->getLinks($links, $base);
+            $res = $engine->getLinks($links, $base, $max_repeat);
         }
         catch (\Exception $ex) { $res['error'] = "Error: ".$ex->getMessage(); }
         return $res;

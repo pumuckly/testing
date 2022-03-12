@@ -134,17 +134,45 @@ final class HTTP {
         $url = ARRAYS::get($data,'url');
         $type = ARRAYS::get($data,'type');
         $params = ARRAYS::get($data,'params');
+        $max_repeat = ARRAYS::get($data,'max_repeat');
         unset($data);
         if ((empty($url))||(empty($type))) { return false; }
         $type = strtolower($type);
         if (!is_array($params)) { $params = []; }
         $params['exception'] = true;
 
-        $res = ['url'=>$url, 'type'=>$type];
+        $res = ['url'=>$url, 'type'=>$type, 'errors'=>false];
         try {
-            $content = self::getOtherSiteContent($url, false, $params);
+            $error = false;
+            $content = false;
+            if (empty($max_repeat)) { $max_repeat = 1; }
+            while ((empty($content))&&($max_repeat>0)) {
+                $max_repeat--;
+                try {
+                    $content = self::getOtherSiteContent($url, false, $params, 60);
+                }
+                catch (\Exception $ex) {
+                    $res['errors'] = true;
+
+                    $err_code = 0;
+                    $msg = $ex->getMessage();
+                    if (preg_match("/;\s*error:\s*([0-9]+);/is",$msg,$m)) { $err_code = $m[1]; }
+
+                    if (($err_code == 6)&&($max_repeat>0)) {
+                        FILE::debug('Error found: '.$err_code.' - Waiting for to repeat get URL '.$url,5);
+                        usleep(100000*mt_rand(10,50)); //when curl "Could not resolve host", wait for 1.0s - 5.0s randomly
+                    }
+                    else {
+                        FILE::debug($err_code.' - '.$msg,5);
+                        throw new \Exception($msg);
+                    }
+                }
+            }
+            if (empty($content)) { throw new \Exception('No content for url: '.$url); }
+
             $res['timing'] = self::getRunTime($url);
             $res['length'] = strlen($content);
+
             if ($type == 'stylesheet') {
                 //TODO: parse stylesheet urls
             }
@@ -397,8 +425,9 @@ final class HTTP {
 
             $err_msg = "CURL error: ".$post_method." ".$url_host." ".$error_message." (request: ".$url."; error: ".$error_code."; response length: ".strlen($ret).")";
             if ((!empty($error_code))&&(!empty($exception))) {
-                if (($erroc_code == 28)&&(preg_match("/^Operation timed out after ([0-9]+) milliseconds/is", $error_message, $errm))) {
-                    $err_msg = "CURL error: ".$post_method." ".$url_host." Operation Timed out after ".round(to_num(array_get($errm,1))/1000,2)."s. (request: ".$url.")";
+                if (($error_code == 28)&&(preg_match("/^Operation timed out after ([0-9]+) milliseconds/is", $error_message, $errm))) {
+                    $rtime = round((array_get($errm,1)*1)/1000,2);
+                    $err_msg = "CURL error: ".$post_method." ".$url_host." Operation Timed out after ".$rtime."s. (request: ".$url.")";
                 }
                 throw new \Exception($err_msg);
             }
