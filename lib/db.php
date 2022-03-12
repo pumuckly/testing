@@ -11,6 +11,7 @@ class DB {
     private $_main = 'performance_test';
 
     private $_state_checks = [];
+    private $_next_statuses = [];
 
     private function __construct() {
         try {
@@ -22,6 +23,7 @@ class DB {
             if ((!array_key_exists('base',self::$_config))||(empty(self::$_config['base']))) { throw new \Exception('Wrong config for DB, no base'); }
             if ((array_key_exists('main',self::$_config))&&(!empty(self::$_config['main']))) { $this->_main = self::$_config['main']; }
             if ((array_key_exists('states',self::$_config))&&(!empty(self::$_config['states']))) { $this->_state_checks = self::$_config['states']; }
+            if ((array_key_exists('statuses',self::$_config))&&(!empty(self::$_config['statuses']))) { $this->_next_statuses = self::$_config['statuses']; }
 
             if (!$this->isCon()) {
                 throw new \Exception('Could not connect to database! Error: '.mysqli_connect_error());
@@ -87,14 +89,9 @@ class DB {
     }
 
     public function getNextStatus($status) {
-        switch ($status) {
-            case 'new': return 'used'; break;
-            case 'used': return 'sent'; break;
-            case 'sent': return 'imapcall'; break;
-            case 'imapcall': return 'received'; break;
-            case 'received': return 'processed'; break;
-            case 'processed': return 'closed'; break;
-        }
+        if (empty($status)) { return false; }
+        $new = ARRAYS::get($this->_next_statuses, $status);
+        if (!empty($new)) { return $new; }
         return false;
     }
 
@@ -123,7 +120,7 @@ class DB {
         }
         $query = 'UPDATE `'.$this->_main.'` SET '.$fields.' WHERE (`id`=\''.$id.'\')';
         $res = $this->_link->query($query);
-        if (!$res) { throw new \Exception('Unable to update record: '.$id); }
+        if (!$res) { throw new \Exception('Unable to update record: '.$id.' - '.$query); }
 
         return true;
     }
@@ -141,7 +138,7 @@ class DB {
         return $data;
     }
 
-    public function getNext($exclude_ids = []) {
+    public function getNext($exclude_ids = [], $engine=false) {
         if (!$this->isCon()) { return false; }
 
         $results = [];
@@ -155,23 +152,25 @@ class DB {
         if (!empty($res)) { $results['new'] = $res->fetch_assoc(); }
         unset($res);
 
-        //get one sent record
-        $query = $query_begin.
-                 '(`status`=\'received\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW()-10)'.
-                 ((ARRAYS::check($this->_state_checks, 'received', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'received').'` IS NOT NULL)' : '').
-                 $query_end;
-        $res = $this->_link->query($query);
-        if (!empty($res)) { $results['received'] = $res->fetch_assoc(); }
-        unset($res);
+        if ($engine !== 'parallel') {
+            //get one sent record
+            $query = $query_begin.
+                     '(`status`=\'received\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW()-10)'.
+                   ((ARRAYS::check($this->_state_checks, 'received', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'received').'` IS NOT NULL)' : '').
+                         $query_end;
+            $res = $this->_link->query($query);
+            if (!empty($res)) { $results['received'] = $res->fetch_assoc(); }
+            unset($res);
 
-        //get one received record
-        $query = $query_begin.
-                 '(`status`=\'processed\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW()-10)'.
-                 ((ARRAYS::check($this->_state_checks, 'rprocessed', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'processed').'` IS NOT NULL)' : '').
-                 $query_end;
-        $res = $this->_link->query($query);
-        if (!empty($res)) { $results['processed'] = $res->fetch_assoc(); }
-        unset($res);
+            //get one received record
+            $query = $query_begin.
+                     '(`status`=\'processed\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW()-10)'.
+                     ((ARRAYS::check($this->_state_checks, 'rprocessed', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'processed').'` IS NOT NULL)' : '').
+                     $query_end;
+            $res = $this->_link->query($query);
+            if (!empty($res)) { $results['processed'] = $res->fetch_assoc(); }
+            unset($res);
+        }
 
         foreach ($results as $key => $res_data) {
             if (!ARRAYS::check($res_data)) { unset($results[$key]); }

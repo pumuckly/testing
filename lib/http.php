@@ -52,48 +52,120 @@ final class HTTP {
     protected static $_temp_dir = DIRECTORY_SEPARATOR.'var'.DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR;
     protected static $_cookie_dir = DIRECTORY_SEPARATOR.'var'.DIRECTORY_SEPARATOR.'www'.DIRECTORY_SEPARATOR.'.cookie'.DIRECTORY_SEPARATOR;
 
-    protected static $_http_code = 0;
-    protected static $_err_no = 0;
-    protected static $_err_str = '';
+    protected static $_last_curl = [];
 
-    protected static $_last_curl_content_type = '';
-    protected static $_last_curl_http_code = false;
-    protected static $_last_curl_header = [];
-    protected static $_last_curl_run_time = 0;
-    protected static $_last_curl_error = 0;
-    protected static $_last_curl_error_str = '';
-
-    public static function getHttpCode() {
-        return self::$http_code;
+    public static function setLastCurl($url, $key, $value) {
+        if (!is_array(self::$_last_curl)) { self::$_last_curl = []; }
+        if (!array_key_exists($url, self::$_last_curl)) { self::$_last_curl[$url] = []; }
+        if (!array_key_exists($key, self::$_last_curl[$url])) { self::$_last_curl[$url][$key] = false; }
+        self::$_last_curl[$url][$key] = $value;
     }
 
-    public static function getError($numeric = true) {
-        if (self::$_err_no == 0) { return false; }
-        elseif ((!$numeric)&&(!empty(self::$_err_str))) { return self::$_err_str; }
-        return self::$_err_no;
+    public static function getLastCurl($url, $key, $clean = false) {
+        if (!is_array(self::$_last_curl)) { self::$_last_curl = []; }
+        if (!array_key_exists($url, self::$_last_curl)) { self::$_last_curl[$url] = []; }
+        $res = null;
+        if (array_key_exists($key, self::$_last_curl[$url])) {
+            $res = self::$_last_curl[$url][$key];
+            if ($clean) {
+                unset(self::$_last_curl[$url][$key]);
+                if (count(self::$_last_curl[$url])==0) { unset(self::$_last_curl[$url]); }
+            }
+        }
+        return $res;
     }
 
-    public static function getRunTime() {
-        return self::$_last_curl_run_time;
+    public static function cleanLastCurl($url) {
+        if (!is_array(self::$_last_curl)) { self::$_last_curl = []; }
+        if (array_key_exists($url, self::$_last_curl)) {
+            unset(self::$_last_curl[$url]);
+        }
+    }
+
+    public static function setError($url, $code=0, $message='') {
+        self::setLastCurl($url, 'error', ['id'=>$code, 'str'=>$message]);
     }
 
     public static function getSavedFileName($filename) {
         return self::$_temp_dir.$filename;
     }
 
+    public static function getRunTime($url, $clean = false) {
+        return self::getLastCurl($url, 'run_time', $clean);
+    }
+
+    public static function getHttpCode($url, $clean = false) {
+        return self::getLastCurl($url, 'http_code', $clean);
+    }
+
+    public static function getContentType($url, $clean = false) {
+        return self::getLastCurl($url, 'content_type', $clean);
+    }
+
+    public static function getHeader($url, $clean = false) {
+        return self::getLastCurl($url, 'header', $clean);
+    }
+
+    public static function getError($url, $numeric = true, $clean = false) {
+        $res = self::getLastCurl($url, 'error', $clean);
+        $id = 0;
+        $str = '';
+        if (is_array($res)) {
+            if (array_key_exists('id', $res)) { $id = $res['id']; }
+            if (array_key_exists('str', $res)) { $str = $res['str']; }
+            if (empty($id)) { $id = ''; }
+        }
+        if ($id == 0) { if ($numeric) { return 0; } return false; }
+        elseif ((!$numeric)&&(!empty($str))) { return $str; }
+        return $id;
+    }
+
+    public static function getUrlStat() {
+        if (func_num_args() !== 2) { return false; }
+
+        $thread = func_get_arg(0);
+        if (!ARRAYS::check($thread)) { return false; }
+        $thread_id = ARRAYS::get($thread, 'id');
+        $log_params = ARRAYS::get($thread, 'log');
+        FILE::logSetParam($log_params);
+        unset($log_params);
+
+        $data = func_get_arg(1);
+        $url = ARRAYS::get($data,'url');
+        $type = ARRAYS::get($data,'type');
+        $params = ARRAYS::get($data,'params');
+        unset($data);
+        if ((empty($url))||(empty($type))) { return false; }
+        $type = strtolower($type);
+        if (!is_array($params)) { $params = []; }
+        $params['exception'] = true;
+
+        $res = ['url'=>$url, 'type'=>$type];
+        try {
+            $content = self::getOtherSiteContent($url, false, $params);
+            $res['timing'] = self::getRunTime($url);
+            $res['length'] = strlen($content);
+            if ($type == 'stylesheet') {
+                //TODO: parse stylesheet urls
+            }
+            unset($content);
+        }
+        catch (\Exception $ex) { $res['error'] = $ex->getMessage(); }
+        return $res;
+    }
+
     public static function getOtherSiteContent($url, $post_data=false, $params=[], $timeout = 15, $debug = false) {
         global $_GET, $_POST, $_SERVER, $HTTP_RAW_POST_DATA;
         $HTTP_RAW_POST_DATA = null;
 
-        self::$_err_str = '';
-        self::$_err_no = 0;
+        self::setError($url, 0, '');
 
-        self::$_last_curl_content_type = '';
-        self::$_last_curl_http_code = false;
-        self::$_last_curl_header = [];
-        self::$_last_curl_run_time = 0;
-        self::$_last_curl_error = 0;
-        self::$_last_curl_error_str = '';
+        self::setLastCurl($url, 'content_type', '');
+        self::setLastCurl($url, 'http_code', false);
+        self::setLastCurl($url, 'header', []);
+        self::setLastCurl($url, 'run_time', 0);
+        self::setLastCurl($url, 'error', 0);
+        self::setLastCurl($url, 'error_str', '');
 
         $ret = '';
 
@@ -115,8 +187,7 @@ final class HTTP {
         if (!is_array($params)) { $params = []; }
 
         if (!$url) {
-            self::$_err_no = -2;
-            self::$_err_str = 'CURL No set URL to get content';
+            self::setError($url, -2, 'CURL No set URL to get content');
             return false;
         }
 
@@ -139,8 +210,7 @@ final class HTTP {
         }
 
         if (!$url_host) {
-            self::$_err_no = -3;
-            self::$_err_str = 'CURL No set URL host';
+            self::setError($url, -3, 'CURL No set URL host');
             return false;
         }
 
@@ -290,8 +360,7 @@ final class HTTP {
         $run_time = 0.0 - microtime(true);
         $ch = curl_init();
         if ((!is_resource($ch))&&(!is_object($ch))) {
-            self::$_err_no = -1;
-            self::$_err_str = 'CURL can not start on url: '.$url;
+            self::setError($url, -1, 'CURL can not start on url: '.$url);
             return false;
         }
 
@@ -302,8 +371,7 @@ final class HTTP {
         $run_time += microtime(true);
 
         $response_header = curl_getinfo($ch);
-        self::$_err_no = curl_errno($ch);
-        self::$_err_str = curl_error($ch);
+        self::setError($url, curl_errno($ch), curl_error($ch));
         curl_close($ch);
 
         unset($options);
@@ -316,18 +384,20 @@ final class HTTP {
 
         $ret = ($HTTP_RAW_POST_DATA != '') ? $HTTP_RAW_POST_DATA : $response;
 
-        self::$_last_curl_content_type = ((is_array($response_header))&&(array_key_exists("content_type", $response_header))) ? $response_header["content_type"] : '';
-        self::$_last_curl_http_code = ((is_array($response_header))&&(array_key_exists("http_code", $response_header))) ? $response_header["http_code"] : false;
-        self::$_last_curl_header = (($get_header)&&(is_array($response_header))) ? $response_header : [];
-        self::$_last_curl_run_time = $run_time;
+        self::setLastCurl($url, 'run_time', $run_time);
+        self::setLastCurl($url, 'content_type', ((is_array($response_header))&&(array_key_exists('content_type', $response_header))) ? $response_header['content_type'] : '');
+        self::setLastCurl($url, 'http_code', ((is_array($response_header))&&(array_key_exists('http_code', $response_header))) ? $response_header['http_code'] : false);
+        self::setLastCurl($url, 'header', (($get_header)&&(is_array($response_header))) ? $response_header : []);
 
-        if ((self::$_err_no != 0)||($debug)||(self::$_debug)) {
-            self::$_last_curl_error = self::$_err_no;
-            self::$_last_curl_error_str = self::$_err_str;
+        $error_code = self::getError($url);
+        $error_message = self::getError($url, false);
+        if ((!empty($error_code))||($debug)||(self::$_debug)) {
+            self::setLastCurl($url, 'error', $error_code);
+            self::setLastCurl($url, 'error_str', $error_message);
 
-            $err_msg = "CURL error: ".$post_method." ".$url_host." ".self::$_err_str." (request: ".$url."; error: ".self::$_err_no."; response length: ".strlen($ret).")";
-            if ((self::$_err_no != 0)&&(!empty($exception))) {
-                if ((self::$_err_no == 28)&&(preg_match("/^Operation timed out after ([0-9]+) milliseconds/is", self::$_err_str, $errm))) {
+            $err_msg = "CURL error: ".$post_method." ".$url_host." ".$error_message." (request: ".$url."; error: ".$error_code."; response length: ".strlen($ret).")";
+            if ((!empty($error_code))&&(!empty($exception))) {
+                if (($erroc_code == 28)&&(preg_match("/^Operation timed out after ([0-9]+) milliseconds/is", $error_message, $errm))) {
                     $err_msg = "CURL error: ".$post_method." ".$url_host." Operation Timed out after ".round(to_num(array_get($errm,1))/1000,2)."s. (request: ".$url.")";
                 }
                 throw new \Exception($err_msg);
@@ -344,8 +414,8 @@ final class HTTP {
                 $encoding = 'UTF-8';
                 if (array_key_exists(5,$rm)) { $encoding = trim(strtoupper($rm[5])); }
                 if ($encoding !== 'UTF-8') {
-                    self::$_last_curl_error = '-6002';
-                    sekf::$_last_curl_error_str = 'Only UTF-8 encoded content allowed.';
+                    self::setLastCurl($url, 'error', -6002);
+                    self::setLastCurl($url, 'error_str',  'Only UTF-8 encoded content allowed.');
                     $ret = false;
                     return $ret;
                 }
@@ -354,14 +424,14 @@ final class HTTP {
                     if (is_array($res)) { $ret = false; return $res; }
                 }
                 catch (\Exception $ex) {
-                    self::$_last_curl_error = '-6003';
-                    sekf::$_last_curl_error_str = 'Could not decode JSON data.';
+                    self::setLastCurl($url. 'error', -6003);
+                    self::setLastCurl($url, 'error_str', 'Could not decode JSON data.');
                     $ret = false;
                     return $ret;
                 }
             }
-            self::$_last_curl_error = '-6001';
-            sekf::$_last_curl_error_str = 'Unknown JSON source received.';
+            self::setLastCurl($url, 'error', -6001);
+            self::setLastCurl($url, 'error_str'. 'Unknown JSON source received.');
         }
         return $ret;
     }

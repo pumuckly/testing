@@ -4,6 +4,11 @@ namespace Pumuckly\Testing;
 
 final class PROCESS {
 
+    protected static $_engine_detect = [
+                          'openlink' => ['key'=>'selenium', 'model'=>'Pumuckly\\Testing\\SELENIUM'],
+                          'gethtml'  => ['key'=>'parallel', 'model'=>'Pumuckly\Testing\\PCURL'],
+                      ];
+
     public static function run() {
         if (func_num_args() !== 3) { return false; }
 
@@ -22,8 +27,18 @@ final class PROCESS {
         $status = ARRAYS::get($data,'status');
         if ((empty($record_id))||($record_id <= 0)) { return false; }
 
-        $selenium_cfg = ARRAYS::get($config,['job','selenium']);
-        if (!ARRAYS::check($selenium_cfg,'server','string')) { return false; }
+        $engine_code = false;
+        $engine_cfg = [];
+        $_engine = ARRAYS::get($config,['job','engine']);
+        if (ARRAYS::check($_engine, 'selenium')) {
+            $engine_cfg = ARRAYS::get($_engine,['selenium']);
+            $engine_code = 'selenium';
+            if (!ARRAYS::check($engine_cfg,'server','string')) { return false; }
+        }
+        elseif (ARRAYS::check($_engine, 'parallel')) {
+            $engine_cfg = ARRAYS::get($_engine,['parallel']);
+            $engine_code = 'parallel';
+        }
 
         $db = DB::getInstance($config['db']);
 
@@ -42,10 +57,17 @@ final class PROCESS {
             if (empty($allowed_step)) { continue; }
             if ($terminate) { break; }
 
-            $selenium = false;
+            $engine = false;
             foreach ($substep as $step => $task) {
                 $type = ARRAYS::get($task, 'type');
-                if (($type)&&(in_array($type,['openlink']))) { $selenium = new SELENIUM($selenium_cfg); break; }
+                if (empty($type)) { continue; }
+                if (!array_key_exists($type, self::$_engine_detect)) { continue; }
+                $e_code = ARRAYS::get(self::$_engine_detect, [$type,'key']);
+                if ($engine_code !== $e_code) { continue; }
+                $model = ARRAYS::get(self::$_engine_detect, [$type,'model']);
+                if (empty($model)) { continue; }
+                $engine = new $model($engine_cfg);
+                break;
             }
 
             try {
@@ -68,7 +90,7 @@ final class PROCESS {
                     $method = 'processStep'.ucfirst($type);
                     if (!method_exists('Pumuckly\Testing\PROCESS', $method)) { throw new \Exception('Unknown method: '.$method); }
 
-                    $res = PROCESS::$method($db, $selenium, $params, $data, $record_id);
+                    $res = PROCESS::$method($db, $engine, $params, $data, $record_id, $engine_code);
                     if (!is_array($res)) { throw new \Exception('No result for step: '.$step_key); }
 
                     PROCESS::processResult($res, $db, $params, $record_id, $step_key, $type);
@@ -87,11 +109,11 @@ final class PROCESS {
                 FILE::debug('Processing job error. Thread: '.$thread_id.' Error: '.$ex->getMessage(),4);
                 $terminate = true;
             }
-            if (isset($selenium)) {
-                if (is_object($selenium)) {
-                    $selenium->close();
+            if (isset($engine)) {
+                if ((is_object($engine))&&(method_exists($engine, 'close'))) {
+                    $engine->close();
                 }
-                unset($selenium);
+                unset($engine);
             }
 print("itt: ".$data['id'].' / '.$data['code']."\n");
 return false;
@@ -135,7 +157,8 @@ return false;
         catch (\Exception $ex) { throw new \Exception('Result processing: '.$ex->getMessage()); }
     }
 
-    public static function processStepOpenlink(&$db, &$selenium, &$params, &$data, $id) {
+    public static function processStepOpenlink(&$db, &$engine, &$params, &$data, $id, $engine_code) {
+        if ($engine_code !== 'selenium') { throw new \Exception('Selenium engine required!'); }
         $step = ARRAYS::get($params, 'step');
         $last = ARRAYS::get($params, 'last');
 
@@ -145,7 +168,7 @@ return false;
             if (empty($link)) { $link = ARRAYS::get($last, 'base', false); }
             if ((empty($link))||($link === true)&&($link === 1)||($link == '1')) { throw new \Exception('Mo base URL set for step: '.$step); }
 
-            $proc = $selenium->getUrl($link);
+            $proc = $engine->getUrl($link);
             $res['timer'] = ARRAYS::get($proc, 'timer');
             $error = ARRAYS::get($proc, 'error');
             if (!empty($error)) { throw new \Exception($error); }
@@ -156,15 +179,17 @@ return false;
         return $res;
     }
 
-    public static function processStepClick(&$db, &$selenium, &$params, &$data, $id) {
+    public static function processStepClick(&$db, &$engine, &$params, &$data, $id, $engine_code) {
+        if ($engine_code !== 'selenium') { throw new \Exception('Selenium engine required!'); }
         $step = ARRAYS::get($params, 'step');
         $last = ARRAYS::get($params, 'last');
+
         $res = [];
         try {
             $xpath = ARRAYS::get($params, 'xpath');
             if (empty($xpath)) { throw new \Exception('Mo XPATH set for step: '.$step); }
 
-            $proc = $selenium->clickXpath($xpath);
+            $proc = $engine->clickXpath($xpath);
             $res['timer'] = ARRAYS::get($proc, 'timer');
             $error = ARRAYS::get($proc, 'error');
             if (!empty($error)) { throw new \Exception($error); }
@@ -175,9 +200,11 @@ return false;
         return $res;
     }
 
-    protected static function processStepSubmit(&$db, &$selenium, &$params, &$data, $id) {
+    protected static function processStepSubmit(&$db, &$engine, &$params, &$data, $id, $engine_code) {
+        if ($engine_code !== 'selenium') { throw new \Exception('Selenium engine required!'); }
         $step = ARRAYS::get($params, 'step');
         $last = ARRAYS::get($params, 'last');
+
         $res = [];
         try {
             $fields = ARRAYS::get($params, 'fields');
@@ -213,23 +240,23 @@ return false;
                     }
                     if (is_array($value)) { $value = false; }
 
-                    $proc = $selenium->clickXpath($xpath, $value, $noerror);
+                    $proc = $engine->clickXpath($xpath, $value, $noerror);
                 }
             }
             $proc = [];
             $filesize == false;
             if (!empty($submit)) {
-                $proc = $selenium->clickXpath($submit);
-                if (!empty($wait)) { $selenium->wait($wait, $submit); }
+                $proc = $engine->clickXpath($submit);
+                if (!empty($wait)) { $engine->wait($wait, $submit); }
             }
             elseif (!empty($dl_xpath)) {
-                $proc = $selenium->download($dl_xpath);
+                $proc = $engine->download($dl_xpath);
                 $filesize = ARRAYS::get($proc, 'filesize', false);
             }
             $res['timer'] = ARRAYS::get($proc, 'timer');
             if (!empty($filesize)) { $res['data'] = $filesize; }
 
-            //$screenshoot = $selenium->screenshoot();
+            //$screenshoot = $engine->screenshoot();
 
             $error = ARRAYS::get($proc, 'error');
             if (!empty($error)) { throw new \Exception('XPATH error: '.$error); }
@@ -240,7 +267,7 @@ return false;
         return $res;
     }
 
-    protected static function processStepImap(&$db, &$selenium, &$params, &$data, $id) {
+    protected static function processStepImap(&$db, &$engine, &$params, &$data, $id, $engine_code) {
         $step = ARRAYS::get($params, 'step');
         $last = ARRAYS::get($params, 'last');
         $res = [];
@@ -255,6 +282,53 @@ return false;
                 if (empty($link)) { throw new \Exception('IMAP Waiting for id: '.$id); }
                 $res['base'] = $link;
             }
+        }
+        catch (\Exception $ex) { $res['error'] = "Error: ".$ex->getMessage(); }
+        return $res;
+    }
+
+    protected static function processStepGethtml(&$db, &$engine, &$params, &$data, $id, $engine_code) {
+        if ($engine_code !== 'parallel') { throw new \Exception('Parallel CURL engine required!'); }
+        $step = ARRAYS::get($params, 'step');
+        $last = ARRAYS::get($params, 'last');
+
+        $res = [];
+        try {
+            $waits = ARRAYS::get($params, 'waitfile');
+            if ($waits > 0) {
+                $waitfile = ARRAYS::get($data, 'waitfile');
+                if (empty($waitfile)) { throw new \Exception("No waiting file specified!!"); }
+                $watchdog = 10000*30; //30 secound
+                while ((!is_file($waitfile))&&($watchdog>0)) { usleep(100); $watchdog--; }
+                if (($watchdog <= 0)&&(!is_file($waitfile))) { throw new \Exception('Terminated processing: Waiting file not created in time (within 30 seconds.'); }
+            }
+
+            $base = ARRAYS::get($params, 'base');
+            if (empty($base)) { throw new \Exception("No base URL specified!"); }
+
+            $res = $engine->getUrl($base);
+        }
+        catch (\Exception $ex) { $res['error'] = "Error: ".$ex->getMessage(); }
+        return $res;
+    }
+
+    protected static function processStepGetlinks(&$db, &$engine, &$params, &$data, $id, $engine_code) {
+        if ($engine_code !== 'parallel') { throw new \Exception('Parallel CURL engine required!'); }
+        $step = ARRAYS::get($params, 'step');
+        $last = ARRAYS::get($params, 'last');
+
+        $res = [];
+        try {
+            $base = ARRAYS::get($params, 'base');
+            if (empty($base)) { $base = ARRAYS::get($last, 'base'); }
+            if (empty($base)) { throw new \Exception("No base URL specified!"); }
+
+            $links = ARRAYS::get($params, 'links');
+            if ($links === 'last') {
+                $links = ARRAYS::get($last, 'links');
+            }
+            if (!ARRAYS::check($links)) { throw new \Exception('No more links'); }
+            $res = $engine->getLinks($links, $base);
         }
         catch (\Exception $ex) { $res['error'] = "Error: ".$ex->getMessage(); }
         return $res;

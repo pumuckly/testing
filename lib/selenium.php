@@ -27,12 +27,14 @@ class SELENIUM {
         $this->_types = ARRAYS::get($conf, 'types');
         if (!ARRAYS::check($this->_types)) { $this->_types = ['chrome']; }
 
+        $self_signed = (!empty(ARRAYS::get($conf, 'self-signed'))) ? true : false;
         $type_idx = array_rand($this->_types);
-        $this->initDriver($this->_types[$type_idx]);
+
+        $this->initDriver($this->_types[$type_idx], $self_signed);
     }
 
     public function __destruct() {
-        $this->closeDriver();
+        $this->clos();
     }
 
     public function close() {
@@ -53,7 +55,7 @@ class SELENIUM {
         $this->_driver = null;
     }
 
-    protected function initDriver($type) {
+    protected function initDriver($type, $elf_signed = false) {
         try {
             $this->closeDriver();
 
@@ -82,18 +84,25 @@ class SELENIUM {
                         $options->addArguments(['user-data-dir='.$this->_user_dir]);
                         $options->addArguments(['applicationCacheEnabled=0']);
 
+                        if (!empty($self_signed)) {
+                            $options->addArguments(['ignore-certificate-errors']);
+                        }
+
                         $desiredCapabilities = DesiredCapabilities::chrome();
                         $desiredCapabilities->setCapability(ChromeOptions::CAPABILITY, $options);
                         unset($options);
                     break;
 
                 case 'firefox':
-
                         $profile = new FirefoxProfile();
                         $profile->setPreference('browser.download.folderList', 2);
                         $profile->setPreference('browser.download.dir', $this->_dl_dir);
                         $profile->setPreference('browser.helperApps.neverAsk.saveToDisk', 'application/pdf');
                         $profile->setPreference('pdfjs.enabledCache.state', false);
+
+                        if (!empty($self_signed)) {
+                            $profile->setPreference('accept_untrusted_certs',true);
+                        }
 
                         $options = new FirefoxOptions();
                         //$options->addArguments(['-headless']);
@@ -152,7 +161,7 @@ FILE::debug('Call DL URL: '.$url, 5);
             HTTP::getOtherSiteContent($url, false, ['exception'=>true,'binary'=>true,'saveas'=>$filename], 30);
             $timer = $timer_init + microtime(true);
 
-            $http_timer = HTTP::getRunTime();
+            $http_timer = HTTP::getRunTime($url);
             if ($http_timer > 0) { $timer = $http_timer; }
 
             $file = HTTP::getSavedFileName($filename);

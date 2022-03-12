@@ -10,7 +10,6 @@ class TEST {
         $this->_config = FILE::parseFileJSON($cfg_file);
         if (!is_array($this->_config)) { throw new \Exception('Wrong configuration file!'); }
         if ((!array_key_exists('db',$this->_config))||(!is_array($this->_config['db']))||(count($this->_config['db'])<4)) { throw new \Exception('No database configuration!'); }
-        if ((!array_key_exists('imap',$this->_config))||(!is_array($this->_config['imap']))||(count($this->_config['imap'])<4)) { throw new \Exception('No mail configuration!'); }
         if ((!array_key_exists('job',$this->_config))||(!is_array($this->_config['job']))||(count($this->_config['job'])<4)) { throw new \Exception('No jobs configuration!'); }
         if ((!array_key_exists('steps',$this->_config['job']))||(!is_array($this->_config['job']['steps']))||(count($this->_config['job']['steps'])==0)) { throw new \Exception('No steps  configuration!'); }
 

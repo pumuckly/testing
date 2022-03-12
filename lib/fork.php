@@ -9,6 +9,7 @@ class FORK {
 
     protected $_threads_max = 8;
     protected $_threads_nums = 8;
+    protected $_engine = false;
 
     protected $_process_max = false;
     protected $_processed = 0;
@@ -16,28 +17,56 @@ class FORK {
     protected $_mail = null;
     protected $_db = null;
 
+    protected $_job_types = [];
+
+    protected $_waitfile = false;
+    protected $_waitfile_name = false;
+    protected $_waitfile_max = 0;
+
+    protected $_php_tmp = DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR.'php'.DIRECTORY_SEPARATOR;
+
     public function __construct($conf) {
         $this->_config = $conf;
         $this->_threads = [];
 
-        $threads = $this->_threads_max;
-        $cfg_threads = $this->getConfig('job','threads');
-        if (($cfg_threads > 0)&&($cfg_threads < $threads)) { $threads = $cfg_threads; }
-        $this->setThreads($threads);
+        $this->_waitfile = false;
+        $this->_waitfile_name = false;
+        $this->_waitfile_max = 0;
 
-        $max_recors = false;
+        $this->_engine = false;
+        $engine = $this->getConfig('job','engine');
+        if (ARRAYS::check($engine,'selenium')) { $this->_engine = 'selenium'; }
+        elseif (ARRAYS::check($engine,'parallel')) { $this->_engine = 'parallel'; }
+
+        $max_records = false;
         $cfg_max_records = $this->getConfig('job','processing');
-        if ((!empty($cfg_max_records))&&($cfg_max_records > 0)) { $max_recors = $cfg_max_records; }
-        $this->_process_max = $max_recors;
+        if ((!empty($cfg_max_records))&&($cfg_max_records > 0)) { $max_records = $cfg_max_records; }
+        $this->_process_max = $max_records;
 
-        $this->_db = DB::getInstance($this->_config['db']);
-        $this->_mail = new IMAP($this->_config['imap']);
+        $threads = $this->_threads_max;
+        $cfg_threads = ARRAYS::get($engine, [$this->_engine,'threads']);
+        if (($this->_engine === 'parallel')&&($cfg_threads > 0)) { $threads = $cfg_threads; $this->_threads_max = $threads; }
+        elseif (($this->_engine === 'selenium')&&($cfg_threads > 0)&&($cfg_threads < $threads)) { $threads = $cfg_threads; }
+        else { $threads = 1; }
 
+        if (($this->_process_max!==false)&&($threads > $this->_process_max)) { $threads = $this->_process_max; }
+        if (($threads>0)&&($threads < $this->_threads_max)) { $this->_threads_max = $threads; }
+
+        $this->setThreads($threads);
+        $this->initSteps();
         $this->init();
         $this->run();
     }
 
     public function __destruct() {
+        if (ARRAYS::check($this->_threads)) {
+            foreach ($this->_threads as $id => &$thread) {
+                if (($thread['future']!==false)&&(is_object($thread['future']))) { $thread['runtime']->kill(); }
+                unset($this->_threads[$id]);
+            }
+        }
+        $this->_threads = [];
+
         if (is_array($this->_config)) {
             $keys = array_keys($this->_config);
             foreach ($keys as $key) {
@@ -67,31 +96,8 @@ class FORK {
         throw new \Exception($msg);
     }
 
-    protected function getNextRecord($exclude_ids=[]) {
-        FILE::debug('Get next record (Processed:  '.$this->_processed.' / '.$this->_process_max.')',1);
-
-        if ((!empty($this->_process_max))&&($this->_processed >= $this->_process_max)) { $this->error('No more records allowed to processing',1); }
-
-        $data = $this->_db->getNext($exclude_ids);
-        if (!is_array($data)) { $this->error('Can not get more data from database',2); }
-
-        $data['email'] = $this->_mail->getEmail($data['code']);
-        $this->_processed++;
-        return $data;
-    }
-
-    protected function init() {
-        $this->initSteps();
-
-        FILE::debug('Forking threads init with '. ($this->_threads_nums). ' threads',3);
-        for ($i = 0; $i < $this->_threads_nums; $i++) {
-            $this->_threads[$i+1] = ['runtime' => new \parallel\Runtime(), 'future'=>false, 'started'=>false, 'data'=>false];
-        }
-        return $this;
-    }
-
     protected function initSteps() {
-        $types = [];
+        $this->_job_types = [];
         foreach ($this->_config['steps'] as $key => $step) {
             if (!ARRAYS::check($step)) { continue; }
             foreach ($step as $skey => $data) {
@@ -101,58 +107,157 @@ class FORK {
                 $res = ARRAYS::get($data, 'params');
                 if (empty($res)) { $res = []; }
                 $res['title'] = ARRAYS::get($data,'title');
-                if ($type == 'imap') { $types[$type]['step_'.$key.$skey] = $res; }
+                if ($type == 'imap') {
+                    $this->_job_types[$type]['step_'.$key.$skey] = $res;
+                }
+                if ($type == 'gethtml') {
+                    $this->_waitfile_max = ARRAYS::get($data, ['params','waitfile']);
+                    if (empty($this->_waitfile_max)) { $this->_waitfile_max = 0; }
+                    elseif ($this->_waitfile_max > $this->_threads_max) { $this->_waitfile_max = $this->_threads_max; }
+                }
             }
         }
-        if (ARRAYS::check($types, 'imap')) {
-            $this->_mail->setJobs($types['imap']);
-        }
+        return $this;
     }
 
-    protected function loadOneThread(&$thread) {
+    protected function init() {
+        //Initialize Database
+        $this->_db = DB::getInstance($this->_config['db']);
+
+        //Initialize imap mail engine
+        $this->_mail = null;
+        if ((ARRAYS::check($this->_config, 'imap'))&&(ARRAYS::check($this->_job_types, 'imap'))) {
+            $this->_mail = new IMAP($this->_config['imap']);
+            if (is_object($this->_mail)) {
+                $this->_mail->setJobs($this->_job_types['imap']);
+            }
+        }
+
+        FILE::debug('Forking threads init with '. ($this->_threads_nums). ' threads for processing '.$this->_process_max.' row',3);
+        for ($i = 0; $i < $this->_threads_nums; $i++) {
+            $this->_threads[$i+1] = ['runtime' => new \parallel\Runtime(), 'future'=>false, 'started'=>false, 'data'=>false];
+        }
+        return $this;
+    }
+
+    protected function getNewWaitFile() {
+        $file = $this->_php_tmp.'wait_file_'.microtime(true).mt_rand(100000,999999).'.tmp';
+        return $file;
+    }
+
+    protected function initWaitFile() {
+        $ids = [];
+        foreach ($this->_threads as $i => &$thread) {
+            $id = ARRAYS::get($thread, ['data','id']);
+            if ((!empty($id))&&(!in_array($id, $ids))) { $ids[] = $id; }
+        }
+
+        if (($this->_waitfile_max > 0)&&(count($this->_threads)>0)) {
+            if (empty($this->_waitfile)) {
+                //no waiting file yet
+                if (count($ids) == 0) {
+                    //create name to send it to the next thread
+                    $this->_waitfile_name = $this->getNewWaitFile();
+                }
+                elseif (($this->_waitfile_name)&&(count($ids) == $this->_waitfile_max)) {
+                    if (!is_file($this->_waitfile_name)) {
+                        touch($this->_waitfile_name);
+                        if (!is_file($this->_waitfile_name)) { throw new \Exception('Unable to create waiting file: '.$this->_waitfile_name); }
+                        chmod($this->_waitfile_name,0666);
+                        $this->_waitfile = true;
+                    }
+                    unset($ids);
+                    return false; //break processing
+                }
+            } else {
+                //waiting file stored
+                if (count($ids)>0) { unset($ids); return false; } //waiting for all parallel task ready
+
+                if ($this->_waitfile_name) { //all thread freed clear waiting file
+                    if (is_file($this->_waitfile_name)) { unlink($this->_waitfile_name); }
+                    $this->_waitfile_name = false;
+                }
+                $this->_waitfile = false;
+                unset($ids);
+                return false; //skip with clean waitfile flag
+            }
+        }
+        return $ids;
+    }
+
+    protected function getNextRecord($exclude_ids=[]) {
+        FILE::debug('Get next record (Processed:  '.$this->_processed.' / '.$this->_process_max.')',1);
+
+        if ((!empty($this->_process_max))&&($this->_processed >= $this->_process_max)) { $this->error('No more records allowed to processing',1); }
+
+        $data = $this->_db->getNext($exclude_ids, $this->_engine);
+        if (!is_array($data)) { $this->error('Can not get more data from database',2); }
+
+        $data['waitfile'] = $this->_waitfile_name;
+
+        if (is_object($this->_mail)) {
+            $data['email'] = $this->_mail->getEmail($data['code']);
+        }
+
+        $this->_processed++;
+        return $data;
+    }
+
+
+    protected function setThread(&$thread, &$ids) {
+        if (!empty($thread['data'])) { return false; }
         if ($thread['future'] !== false) { return false; } //already running a task on this thread?
         try {
-            $ids = [];
-            foreach ($this->_threads as $i => &$thr) {
-                $id = ARRAYS::get($thr, ['data','id']);
-                if ((!empty($id))&&(!in_array($id, $ids))) { $ids[] = $id; }
-            }
             $thread['data'] = $this->getNextRecord($ids); //try to get one record from database
             $thread['started'] = false; //flag to need restart thread
         }
-        catch (\Exception $ex) { return false; }
+        catch (\Exception $ex) {
+            return false;
+        }
         return true;
     }
 
     protected function run() {
         $exit = false;
         while ((!$exit)&&(!empty($this->_threads))) {
-
-            $this->_mail->process();
-
+            if (is_object($this->_mail)) {
+                $this->_mail->process();
+            }
 
             foreach ($this->_threads as $i => &$thread) {
-                if (empty($thread['data'])) {
-                     $setNew = $this->loadOneThread($thread); //while has more record
+                $wait_threads = false;
+                $ids = $this->initWaitFile();
+                if (($ids === false)||(!is_array($ids))) { $wait_threads = true; }
+
+                if (!$wait_threads) {
+                    $setNew = $this->setThread($thread, $ids);
+                    if (isset($ids)) { unset($ids); }
+
+                    if (($thread['future'] === false)&&($thread['started'] === false)&&(!empty($thread['data']))) {
+                        $thread['started'] = true;
+                        $callfunc = function() {
+                            require_once('vendor/autoload.php');
+                            include_once('vendor/pumuckly/testing/autoload.php');
+                            return call_user_func_array('Pumuckly\\Testing\\PROCESS::run', func_get_args());
+                        };
+                        $thread['future'] =
+                                $thread['runtime']->run($callfunc, [
+                                      'thread'=>['id'=>$i, 'parent'=>getmypid(), 'log'=>FILE::logGetParam()],
+                                      'config'=>$this->_config,
+                                      'data'=>$thread['data']
+                                ]);
+                        FILE::debug($i.' thread - started',2);
+                        continue;
+                    }
+                    if ($thread['future'] === false) { // no need to use this thread anymore
+                        FILE::debug($i." thread - stopped",8);
+                        unset($this->_threads[$i]);
+                        continue;
+                    }
                 }
-                if (($thread['future'] === false)&&($thread['started'] === false)&&(!empty($thread['data']))) {
-                    $thread['started'] = true;
-                    $callfunc = function() {
-                        require_once('vendor/autoload.php');
-                        include_once('vendor/pumuckly/testing/autoload.php');
-                        return call_user_func_array('Pumuckly\Testing\PROCESS::run', func_get_args());
-                    };
-                    $thread['future'] = $thread['runtime']->run($callfunc, ['thread'=>['id'=>$i, 'parent'=>getmypid(), 'log'=>FILE::logGetParam()], 'config'=>$this->_config, 'data'=>$thread['data']]);
-                    FILE::debug($i.' thread - started',2);
-                    continue;
-                }
-                if ($thread['future'] === false) {
-                    FILE::debug($i." thread - stopped",2);
-                    unset($this->_threads[$i]);
-                    continue;
-                }
-                if ($thread['future']->done()) {
+                if (($thread['future'] !== false)&&($thread['future']->done())) {
                     $result = $thread['future']->value(); // processing result
+
                     FILE::debug($i.' thread - processed',2);
                     FILE::debug($i.' thread result:',1);
                     FILE::debug($result,1);
