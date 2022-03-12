@@ -10,6 +10,7 @@ use Facebook\WebDriver\Firefox\FirefoxDriver;
 use Facebook\WebDriver\Firefox\FirefoxOptions;
 use Facebook\WebDriver\Firefox\FirefoxProfile;
 use Facebook\WebDriver\WebDriverBy;
+use Facebook\WebDriver\WebDriverExpectedCondition;
 
 class SELENIUM {
 
@@ -214,7 +215,9 @@ FILE::debug($res, 5);
             FILE::debug('Clicking on: '.$xpath, 0);
             $timer_init = 0.0 - microtime(true);
             $element->click();
-            if ($noError) { $this->_driver->manage()->timeouts()->implicitlyWait(2); }
+            if ($noError) {
+                $this->_driver->manage()->timeouts()->implicitlyWait(2);
+            }
             if (($setValue !== false)&&(!is_array($setValue))) {
                 $this->_driver->manage()->timeouts()->implicitlyWait(1);
                 $this->_driver->getKeyboard()->sendKeys($setValue);
@@ -234,34 +237,12 @@ FILE::debug($res, 5);
         return $res;
     }
 
-    public function wait($xpath, $submit) {
+    public function wait($xpath, $sleep = 1) {
         $driver = &$this->_driver;
-/*
-        $this->_driver->wait(10,125)->until(
-//            WebDriverExpectedCondition::visibilityOfElementLocated(WebDriverBy::xpath($xpath))
-            function () use (&$driver, $xpath, $submit) {
-                if (!is_object($driver)) { throw new \Exception('No WebDriver'); }
-                $res = false;
-                try {
-                    $elements = $driver->findElements(WebDriverBy::xpath($xpath));
-                    $res = (count($elements) > 0);
-                    unset($elements);
-                } catch (\Exception $ex) { $res = false; }
-                if (empty($res)) {
-                    try {
-                        $element = $driver->findElement(WebDriverBy::xpath($submit));
-                        $element->click();
-                        unset($element);
-                    } catch (\Exception $ex) { $res = false; }
-                }
-                $fname = DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR.'screenshoot_'.microtime(true).'.png';
-                $driver->takeScreenshot($fname);
-                @chmod($fname, 02666);
-                return $res;
-            },
-            'Error: Waiting timeout exceeded.'
-        );
-*/
+        $this->_driver->wait(10,250)->until(WebDriverExpectedCondition::visibilityOfElementLocated(WebDriverBy::xpath($xpath)));
+        $elements = $driver->findElements(WebDriverBy::xpath($xpath));
+        if (count($elements) > 0) { usleep($sleep*1000000); }
+        unset($elements);
     }
 
 }

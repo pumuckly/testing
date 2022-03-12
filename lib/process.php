@@ -247,7 +247,7 @@ return false;
             $filesize = false;
             if (!empty($submit)) {
                 $proc = $engine->clickXpath($submit);
-                if (!empty($wait)) { $engine->wait($wait, $submit); }
+                if (!empty($wait)) { $engine->wait($wait, 1); }
             }
             elseif (!empty($dl_xpath)) {
                 $proc = $engine->download($dl_xpath);
