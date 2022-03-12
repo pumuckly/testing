@@ -244,7 +244,7 @@ return false;
                 }
             }
             $proc = [];
-            $filesize == false;
+            $filesize = false;
             if (!empty($submit)) {
                 $proc = $engine->clickXpath($submit);
                 if (!empty($wait)) { $engine->wait($wait, $submit); }

@@ -17,6 +17,7 @@ class SELENIUM {
     private $_types = [];
 
     private $_driver = null;
+    private $_type = '';
 
     private $_user_dir = '';
     private $_dl_dir = '';
@@ -27,14 +28,14 @@ class SELENIUM {
         $this->_types = ARRAYS::get($conf, 'types');
         if (!ARRAYS::check($this->_types)) { $this->_types = ['chrome']; }
 
-        $self_signed = (!empty(ARRAYS::get($conf, 'self-signed'))) ? true : false;
+        $self_signed = (!empty(ARRAYS::get($conf, 'selfsigned'))) ? true : false;
         $type_idx = array_rand($this->_types);
 
         $this->initDriver($this->_types[$type_idx], $self_signed);
     }
 
     public function __destruct() {
-        $this->clos();
+        $this->close();
     }
 
     public function close() {
@@ -55,7 +56,7 @@ class SELENIUM {
         $this->_driver = null;
     }
 
-    protected function initDriver($type, $elf_signed = false) {
+    protected function initDriver($type, $self_signed = false) {
         try {
             $this->closeDriver();
 
@@ -65,6 +66,8 @@ class SELENIUM {
             $desiredCapabilities = false;
             switch ($type) {
                 case 'chrome':
+                        $this->_type = $type;
+
                         $options = new ChromeOptions();
                         $prefs = [
                             'download.default_directory' => $this->_dl_dir,
@@ -85,7 +88,8 @@ class SELENIUM {
                         $options->addArguments(['applicationCacheEnabled=0']);
 
                         if (!empty($self_signed)) {
-                            $options->addArguments(['ignore-certificate-errors']);
+                            $options->addArguments(['--ignore-certificate-errors']);
+                            $options->addArguments(['acceptInsecureCerts=true']);
                         }
 
                         $desiredCapabilities = DesiredCapabilities::chrome();
@@ -94,6 +98,8 @@ class SELENIUM {
                     break;
 
                 case 'firefox':
+                        $this->_type = $type;
+
                         $profile = new FirefoxProfile();
                         $profile->setPreference('browser.download.folderList', 2);
                         $profile->setPreference('browser.download.dir', $this->_dl_dir);
