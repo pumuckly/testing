@@ -123,6 +123,9 @@ class FORK {
     protected function init() {
         //Initialize Database
         $this->_db = DB::getInstance($this->_config['db']);
+        if (is_object($this->_db)) {
+            $this->_db->init();
+        }
 
         //Initialize imap mail engine
         $this->_mail = null;

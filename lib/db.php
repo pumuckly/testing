@@ -10,6 +10,7 @@ class DB {
     private $_link = null;
     private $_main = 'performance_test';
 
+    private $_init = [];
     private $_state_checks = [];
     private $_next_statuses = [];
 
@@ -21,9 +22,11 @@ class DB {
             if ((!array_key_exists('pass',self::$_config))||(empty(self::$_config['pass']))) { throw new \Exception('Wrong config for DB, no pass'); }
             if ((!array_key_exists('port',self::$_config))||(empty(self::$_config['port']))) { throw new \Exception('Wrong config for DB, no port'); }
             if ((!array_key_exists('base',self::$_config))||(empty(self::$_config['base']))) { throw new \Exception('Wrong config for DB, no base'); }
+
             if ((array_key_exists('main',self::$_config))&&(!empty(self::$_config['main']))) { $this->_main = self::$_config['main']; }
-            if ((array_key_exists('states',self::$_config))&&(!empty(self::$_config['states']))) { $this->_state_checks = self::$_config['states']; }
-            if ((array_key_exists('statuses',self::$_config))&&(!empty(self::$_config['statuses']))) { $this->_next_statuses = self::$_config['statuses']; }
+            if ((array_key_exists('states',self::$_config))&&(!empty(self::$_config['states']))&&(is_array(self::$_config['states']))) { $this->_state_checks = self::$_config['states']; }
+            if ((array_key_exists('statuses',self::$_config))&&(!empty(self::$_config['statuses']))&&(is_array(self::$_config['statuses']))) { $this->_next_statuses = self::$_config['statuses']; }
+            if ((array_key_exists('init',self::$_config))&&(!empty(self::$_config['init']))&&(is_array(self::$_config['init']))) { $this->_init = self::$_config['init']; }
 
             if (!$this->isCon()) {
                 throw new \Exception('Could not connect to database! Error: '.mysqli_connect_error());
@@ -86,6 +89,38 @@ class DB {
             self::$_instance = new DB($conf);
         }
         return self::$_instance;
+    }
+
+    public function init() {
+        if (!$this->isCon()) { return false; }
+        if (!ARRAYS::check($this->_init,'prefix','string')) { return false; }
+        $from = ARRAYS::get($this->_init,'start');
+        if (empty($from)) { return false; }
+        $to = ARRAYS::get($this->_init,'end');
+        if (empty($to)) { return false; }
+        $digit = ARRAYS::get($this->_init,'digit');
+        if ($from >= $to) { return false; }
+        if (empty($digit)) { $digit = 0; }
+
+        $key = ARRAYS::get($this->_init,'prefix').'{id}'.ARRAYS::get($this->_init,'suffix');
+
+        $this->_link->begin_transaction();
+        try {
+            for ($i = $from; $i <=$to; $i++) {
+                $id = $i;
+                if ($digit > 0) { $id = str_pad($i, $digit, '0', STR_PAD_LEFT); }
+                $code = str_replace('{id}',$id, $key);
+                $query = 'SELECT `id` FROM `'.$this->_main.'` WHERE (`code`=\''.$code.'\')';
+                $res = $this->_link->query($query);
+                if (empty($res)) { throw new \Exception('Unable to run query on datatable');  }
+                if ($res->num_rows > 0) { continue; } //record exists
+                $query = 'INSERT INTO `'.$this->_main.'` (`id`,`code`) VALUES (NULL, \''.$code.'\')';
+                $res = $this->_link->query($query);
+                if (empty($res)) { throw new \Exception('Unable to isert record to datatable'); }
+            }
+            $this->_link->commit();
+        }
+        catch (\mysqli_sql_exception $ex) { $this->_link->rollback(); }
     }
 
     public function getNextStatus($status) {
