@@ -141,6 +141,15 @@ return false;
                     foreach ($pdata as $field => $key) {
                         if (!array_key_exists($field, $data)) { continue; }
                         $value = ARRAYS::get($data, $field);
+
+                        $field = ARRAYS::get($params, ['fields', $field]);
+                        $fvalues = false;
+                        foreach ($field as $frow) {
+                            $fvalues = ARRAYS::get($frow,'value');
+                            if (!empty($fvalues)) { break; }
+                        }
+                        if ((ARRAYS::check($fvalues))&&(empty($value))&&(in_array(0,$fvalues))) { $value = '0'; }
+
                         if (is_array($value)) { continue; } //TODO: serialize array
                         $update[$step.$key] = $value;
                     }
@@ -233,10 +242,11 @@ return false;
                     if (ARRAYS::check($value)) {
                         $val_idx = array_rand($value);
                         $value = $value[$val_idx];
-                        if (empty($value)) { $xpath = str_replace('{{value}}', '0', $xpath); }
+                        if (empty($value)) { $value = '0'; $xpath = str_replace('{{value}}', '0', $xpath); }
                         else { $xpath = str_replace('{{value}}', $value, $xpath); }
                         if (!ARRAYS::check($res,'data')) { $res['data'] = []; }
                         $res['data'][$key] = $value;
+                        $value = false;
                     }
                     if (is_array($value)) { $value = false; }
 
