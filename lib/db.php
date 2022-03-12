@@ -150,7 +150,7 @@ class DB {
             if (empty($field)) { continue; }
             if ($fields) { $fields .= ', '; }
             $fields .= '`'.$field.'`=';
-            if (empty($value)) { $fields .= 'NULL'; }
+            if ((empty($value))&&($value !== '0')) { $fields .= 'NULL'; }
             else { $fields .= '\''.$this->_link->real_escape_string($value).'\''; }
         }
         $query = 'UPDATE `'.$this->_main.'` SET '.$fields.' WHERE (`id`=\''.$id.'\')';
