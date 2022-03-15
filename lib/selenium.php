@@ -20,6 +20,7 @@ class SELENIUM {
     private $_driver = null;
     private $_type = '';
 
+    private $_base_dir = '';
     private $_user_dir = '';
     private $_dl_dir = '';
     
@@ -31,8 +32,9 @@ class SELENIUM {
 
         $self_signed = (!empty(ARRAYS::get($conf, 'selfsigned'))) ? true : false;
         $type_idx = array_rand($this->_types);
+        $base_dir = ARRAYS::get($conf, 'basedir');
 
-        $this->initDriver($this->_types[$type_idx], $self_signed);
+        $this->initDriver($this->_types[$type_idx], $self_signed, $base_dir);
     }
 
     public function __destruct() {
@@ -41,6 +43,18 @@ class SELENIUM {
 
     public function close() {
         $this->closeDriver();
+    }
+
+    protected function initBaseDir($base_dir) {
+        if (empty($base_dir)) {
+            $base_dir = DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR.'selenium';
+        }
+        $this->_base_dir = preg_replace("/".preg_quote(DIRECTORY_SEPARATOR,"/")."\$/is", '', $base_dir);
+        if ((!empty($this->_base_dir))&&(!is_dir($this->_base_dir))) {
+            DIRECTORY::create($this->_base_dir, true);
+        }
+        if (!preg_match("/".preg_quote(DIRECTORY_SEPARATOR,"/")."\$/is", $this->_base_dir)) { $this->_base_dir .= DIRECTORY_SEPARATOR; }
+        return $this;
     }
 
     protected function closeDriver() {
@@ -55,14 +69,27 @@ class SELENIUM {
             //TODO: remove completely
         }
         $this->_driver = null;
+
+        if ((!empty($this->_user_dir))&&(is_dir($this->_user_dir))) {
+            DIRECTORY::delete($this->_user_dir, true, $this->_base_dir, true);
+            $this->_user_dir = false;
+        }
     }
 
-    protected function initDriver($type, $self_signed = false) {
+    protected function initDriver($type, $self_signed = false, $base_dir = '') {
         try {
             $this->closeDriver();
 
-            $this->_dl_dir = '/tmp/selenium/downloads';
-            $this->_user_dir = '/tmp/selenium/cookies/'.$type.'.'.microtime(true).mt_rand(100000,150000);
+            $this->initBaseDir($base_dir);
+
+            $this->_dl_dir = $this->_base_dir.'downloads';
+            $this->_user_dir = $this->_base_dir.'cookies'.DIRECTORY_SEPARATOR.$type.'.'.microtime(true).mt_rand(100000,150000);
+            if (!is_dir($this->_dl_dir)) {
+                DIRECTORY::create($this->_dl_dir, true);
+            }
+            if (!is_dir($this->_user_dir)) {
+                DIRECTORY::create($this->_user_dir, true);
+            }
 
             $desiredCapabilities = false;
             switch ($type) {

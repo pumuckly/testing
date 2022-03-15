@@ -1,0 +1,4 @@
+# default paths
+PATH=/usr/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+
+* * * * * root  test -x /root/bin/delete.sh && /root/bin/delete.sh > /dev/null 2>&1
