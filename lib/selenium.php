@@ -140,40 +140,75 @@ class SELENIUM {
         }
     }
 
-    public function screenshoot() {
-        $fname = DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR.'screenshoot_'.microtime(true).mt_rand(10000,99999).'.png';
+    public function screenshoot($filename=false) {
+        if (empty($filename)) { $filename = 'screenshoot_'.microtime(true).mt_rand(10000,99999).'.png'; }
+        $fname = DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR.$filename;
         $this->_driver->takeScreenshot($fname);
         @chmod($fname, 02666);
         return $fname;
     }
 
-    public function download($xpath, $submit) {
+    public function download($xpath, $on_error=false) {
         $res = [];
+        $url = '';
         try {
             $timer_init = 0.0 - microtime(true);
             $url = false;
             if (empty($xpath)) { throw new \Exception('No xpath for file download'); }
 
-            $element = $this->_driver->findElement(WebDriverBy::xpath($xpath));
-            if ((!isset($element))||(empty($element))) { throw new \Exception('No A node found by xpath!'); }
-            $url = $element->getAttribute('href');
-            unset($element);
-FILE::debug('Call DL URL: '.$url, 5);
+            $do_catch = false;
+            try {
+                $element = $this->_driver->findElement(WebDriverBy::xpath($xpath));
+                if ((!isset($element))||(empty($element))) { throw new \Exception('No A node found by xpath!'); }
+                $url = $element->getAttribute('href');
+                unset($element);
+            }
+            catch (\Exception $ex) {
+                $err_msg = $ex->getMessage();
+                if (preg_match("/no such element:.+/is",$err_msg)) { $do_catch = $ex->getMessage(); }
+                else { throw new \Exception($err_msg); }
+            }
+
+            if ((!$url)&&($do_catch)&&(ARRAYS::check($on_error))) {
+                $have_error = false;
+                foreach ($on_error as $err_key => $error) {
+                    try {
+                        $xpath = ARRAYS::get($error, 'xpath');
+                        $xval = ARRAYS::get($error, 'value');
+                        if ((empty($xpath))||(empty($xval))) { continue; }
+                        $element = $this->_driver->findElement(WebDriverBy::xpath($xpath));
+                        if ((!isset($element))||(empty($element))) { throw new \Exception('Node not found!'); }
+                        $node_val = $element->getText();
+                        if (strpos($node_val, $xval)!==false) {
+                            $res['handled_error'] = $err_key;
+                            $url = ARRAYS::get($error, ['handle','download']);
+                            break;
+                        }
+                    }
+                    catch (\Exception $ex) { $have_error = $ex->getMessage(); }
+                }
+                if (!empty($have_error)) { throw new \Exception("Last: ".$have_error); }
+            }
 
             if (empty($url)) { throw new \Exception('No URL specified!'); }
+            $res['title'] = $url;
 
             FILE::debug('Call URL: '.$url, 0);
             $filename = 'dl.'.microtime(true).mt_rand(100000,200000).'.tmp';
             $timer_init = 0.0 - microtime(true);
-            HTTP::getOtherSiteContent($url, false, ['exception'=>true,'binary'=>true,'saveas'=>$filename], 30);
+            HTTP::getOtherSiteContent($url, false, ['exception'=>true,'binary'=>true,'saveas'=>$filename], 90);
             $timer = $timer_init + microtime(true);
+            FILE::debug('File downloaded in '.$timer, 0);
 
             $http_timer = HTTP::getRunTime($url);
             if ($http_timer > 0) { $timer = $http_timer; }
+            FILE::debug('File download time corrected to '.$timer, 0);
 
             $file = HTTP::getSavedFileName($filename);
+            FILE::debug('Downloaded into file: '.$file, 0);
             if (is_file($file)) {
                 $res['filesize'] = filesize($file);
+                FILE::debug('File downloaded. Size: '.$res['filesize'], 0);
                 unlink($file); 
             }
         }
@@ -182,7 +217,7 @@ FILE::debug('Call DL URL: '.$url, 5);
             $res['error'] = $ex->getMessage(); 
         }
         $res['timer'] = $timer;
-FILE::debug($res, 5);
+
         return $res;
     }
 
@@ -239,7 +274,9 @@ FILE::debug($res, 5);
 
     public function wait($xpath, $sleep = 1) {
         $driver = &$this->_driver;
-        $this->_driver->wait(10,250)->until(WebDriverExpectedCondition::visibilityOfElementLocated(WebDriverBy::xpath($xpath)));
+        $this->_driver->wait(10,250)->until(
+            WebDriverExpectedCondition::visibilityOfElementLocated(WebDriverBy::xpath($xpath))
+        );
         $elements = $driver->findElements(WebDriverBy::xpath($xpath));
         if (count($elements) > 0) { usleep($sleep*1000000); }
         unset($elements);

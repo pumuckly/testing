@@ -4,6 +4,8 @@ namespace Pumuckly\Testing;
 
 final class PROCESS {
 
+    protected static $_debug = false;
+
     protected static $_engine_detect = [
                           'openlink' => ['key'=>'selenium', 'model'=>'Pumuckly\\Testing\\SELENIUM'],
                           'gethtml'  => ['key'=>'parallel', 'model'=>'Pumuckly\Testing\\PCURL'],
@@ -11,14 +13,12 @@ final class PROCESS {
 
     public static function run() {
         if (func_num_args() !== 3) { return false; }
-
         $thread = func_get_arg(0);
         if (!ARRAYS::check($thread)) { return false; }
         $thread_id = ARRAYS::get($thread, 'id');
         $log_params = ARRAYS::get($thread, 'log');
         FILE::logSetParam($log_params);
         unset($log_params);
-
         $config = func_get_arg(1);
         if (!ARRAYS::check($config)) { return false; }
 
@@ -42,7 +42,7 @@ final class PROCESS {
 
         $db = DB::getInstance($config['db']);
 
-        FILE::debug($thread_id.'. thread begin with record id: '.$record_id, 3);
+        FILE::debug($thread_id.'. thread begin with record id: '.$record_id.' - '.memory_get_usage(true), 3);
 
         $terminate = false;
         $step_keys = [];
@@ -106,7 +106,7 @@ final class PROCESS {
             }
             catch (\Exception $ex) {
                 if (isset($params)) { unset($params); }
-                FILE::debug('Processing job error. Thread: '.$thread_id.' Error: '.$ex->getMessage(),4);
+                FILE::debug('Processing job error. Thread: '.$thread_id.' Error: '.$ex->getMessage().' - '.memory_get_usage(true),4);
                 $terminate = true;
             }
             if (isset($engine)) {
@@ -115,9 +115,8 @@ final class PROCESS {
                 }
                 unset($engine);
             }
-print("itt: ".$data['id'].' / '.$data['code']."\n");
-return false;
         }
+        print("processed: ".$data['id'].' / '.$data['code'].' - '.memory_get_usage(true)."\n");
         return true;
     }
 
@@ -125,6 +124,7 @@ return false;
         $error = false;
         $error = ARRAYS::get($result, 'error');
         try {
+            if (self::$_debug) { FILE::debug('processing result: '.$id, 0); }
             if (!empty($error)) { throw new \Exception('Error in type: \''.$type.'\' (\''.$step.'\'). Error: '.$error); }
             $update = [];
             $timer = ARRAYS::get($result, 'timer');
@@ -142,16 +142,19 @@ return false;
                         if (!array_key_exists($field, $data)) { continue; }
                         $value = ARRAYS::get($data, $field);
 
-                        $field = ARRAYS::get($params, ['fields', $field]);
                         $fvalues = false;
-                        foreach ($field as $frow) {
-                            $fvalues = ARRAYS::get($frow,'value');
-                            if (!empty($fvalues)) { break; }
+                        $fld = ARRAYS::get($params, ['fields', $field]);
+                        if (ARRAYS::check($fld)) {
+                            foreach ($fld as $frow) {
+                                $fvalues = ARRAYS::get($frow,'value');
+                                if (!empty($fvalues)) { break; }
+                            }
                         }
                         if ((ARRAYS::check($fvalues))&&(empty($value))&&(in_array(0,$fvalues))) { $value = '0'; }
 
                         if (is_array($value)) { continue; } //TODO: serialize array
                         $update[$step.$key] = $value;
+                        if (($field == 'error')&&(!empty($value))) { $update['status'] = $db->getLastState(); }
                     }
                 }
                 unset($pdata);
@@ -159,6 +162,7 @@ return false;
             }
             
             if (ARRAYS::check($update)) {
+                if (self::$_debug) { FILE::debug('processing result update: '.$id, 0); }
                 $db->update($id, $update);
             }
             unset($update);
@@ -173,9 +177,14 @@ return false;
 
         $res = [];
         try {
+            if (self::$_debug) { FILE::debug('step openlink: '.$id, 0); }
+
             $link = ARRAYS::get($params, 'base');
             if (empty($link)) { $link = ARRAYS::get($last, 'base', false); }
             if ((empty($link))||($link === true)&&($link === 1)||($link == '1')) { throw new \Exception('Mo base URL set for step: '.$step); }
+
+            if (self::$_debug) { FILE::debug('step openlink: '.$link, 0); }
+
 
             $proc = $engine->getUrl($link);
             $res['timer'] = ARRAYS::get($proc, 'timer');
@@ -195,6 +204,8 @@ return false;
 
         $res = [];
         try {
+            if (self::$_debug) { FILE::debug('step click: '.$id, 0); }
+
             $xpath = ARRAYS::get($params, 'xpath');
             if (empty($xpath)) { throw new \Exception('Mo XPATH set for step: '.$step); }
 
@@ -216,6 +227,8 @@ return false;
 
         $res = [];
         try {
+            if (self::$_debug) { FILE::debug('step submit: '.$id, 0); }
+
             $fields = ARRAYS::get($params, 'fields');
             if (!ARRAYS::check($fields)) { throw new \Exception('Not set fields for step: '.$step); }
 
@@ -253,18 +266,50 @@ return false;
                     $proc = $engine->clickXpath($xpath, $value, $noerror);
                 }
             }
+
             $proc = [];
             $filesize = false;
+            $error = false;
             if (!empty($submit)) {
+                if (self::$_debug) { FILE::debug('step submit fields: '.$id, 0); }
+                usleep(500000); //wait shortly (0.5s) for animations
                 $proc = $engine->clickXpath($submit);
                 if (!empty($wait)) { $engine->wait($wait, 1); }
             }
             elseif (!empty($dl_xpath)) {
-                $proc = $engine->download($dl_xpath);
+                if (self::$_debug) { FILE::debug('step download: '.$id, 0); }
+                $on_error = ARRAYS::get($params, 'error');
+                if (ARRAYS::check($on_error)) {
+                    foreach ($on_error as $e_key => $e_handler) {
+                        $err_dl = ARRAYS::get($e_handler, ['handle', 'download']);
+                        if (!is_array($err_dl)) { continue; }
+                        $err_src = ARRAYS::get($e_handler, ['handle', 'source']);
+                        if (empty($err_src)) { continue; }
+                        unset($on_error[$e_key]['handle']['source']);
+                        $xkey = $db->getField($id, $err_src);
+                        if ($xkey === '0') { $xkey = '1'; }
+                        $set_url = ARRAYS::get($err_dl, $xkey);
+                        if (empty($set_url)) {
+                            $set_url = false;
+                            foreach ($err_dl as $furl) { $set_url = $furl; break; }
+                        }
+                        $on_error[$e_key]['handle']['download'] = $set_url;
+                    }
+                }
+                $proc = $engine->download($dl_xpath, $on_error);
+                unset($on_error);
                 $filesize = ARRAYS::get($proc, 'filesize', false);
+                $error = ARRAYS::get($proc, 'handled_error', false);
             }
             $res['timer'] = ARRAYS::get($proc, 'timer');
-            if (!empty($filesize)) { $res['data'] = $filesize; }
+            if (!empty($filesize)) {
+                if (!ARRAYS::check($res,'data')) { $res['data'] = []; }
+                $res['data']['filesize'] = $filesize;
+            }
+            if (!empty($error)) {
+                if (!ARRAYS::check($res,'data')) { $res['data'] = []; }
+                $res['data']['error'] = $error;
+            }
 
             //$screenshoot = $engine->screenshoot();
 
@@ -273,7 +318,12 @@ return false;
             $res['title'] = ARRAYS::get($proc, 'title');
             if (empty($res['title'])) { throw new \Exception('Unable to find title in the page'); }
         }
-        catch (\Exception $ex) { $res['error'] = "Error: ".$ex->getMessage(); }
+        catch (\Exception $ex) {
+            $res['error'] = "Error: ".$ex->getMessage();
+            $fname = 'screenshot_'.$id.'_'.$step.'_'.microtime(true).'.png';
+            $screenshoot = $engine->screenshoot($fname);
+            FILE::debug('Screenshot file created: '.$fname,4);
+        }
         return $res;
     }
 
@@ -282,6 +332,8 @@ return false;
         $last = ARRAYS::get($params, 'last');
         $res = [];
         try {
+            if (self::$_debug) { FILE::debug('step imap: '.$id, 0); }
+
             $date = $db->getField($id, $step);
             if (empty($date)) { throw new \Exception('IMAP Waiting for id: '.$id); }
             $res['date'] = $date;
@@ -304,6 +356,8 @@ return false;
 
         $res = [];
         try {
+            if (self::$_debug) { FILE::debug('step get HTML: '.$id, 0); }
+
             $waits = ARRAYS::get($params, 'waitfile');
             if ($waits > 0) {
                 $waitfile = ARRAYS::get($data, 'waitfile');
@@ -331,6 +385,8 @@ return false;
 
         $res = [];
         try {
+            if (self::$_debug) { FILE::debug('step get HTML links: '.$id, 0); }
+
             $base = ARRAYS::get($params, 'base');
             if (empty($base)) { $base = ARRAYS::get($last, 'base'); }
             if (empty($base)) { throw new \Exception("No base URL specified!"); }

@@ -49,8 +49,8 @@ final class HTTP {
 
     protected static $_debug = false;
 
-    protected static $_temp_dir = DIRECTORY_SEPARATOR.'var'.DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR;
-    protected static $_cookie_dir = DIRECTORY_SEPARATOR.'var'.DIRECTORY_SEPARATOR.'www'.DIRECTORY_SEPARATOR.'.cookie'.DIRECTORY_SEPARATOR;
+    protected static $_temp_dir = DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR.'php_upload'.DIRECTORY_SEPARATOR;
+    protected static $_cookie_dir = DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR.'php_upload'.DIRECTORY_SEPARATOR.'.cookie'.DIRECTORY_SEPARATOR;
 
     protected static $_last_curl = [];
 
@@ -338,6 +338,9 @@ final class HTTP {
             $options[CURLOPT_VERBOSE] = (($debug) ? true : false);
             $options[CURLOPT_RETURNTRANSFER] = true;
         }
+        elseif ((!DIRECTORY::create(dirname($save_as_file), true))&&($exception)) {
+            throw new \Exception('Unable to create directory: '.dirname($save_as_file));
+        }
 
         if ((is_array($proxy)) && (count($proxy) > 0) && (array_key_exists('host', $proxy)) && (array_key_exists('port', $proxy)) && (array_key_exists('user', $proxy)) && (array_key_exists('pass', $proxy))) {
             $options[CURLOPT_PROXY] = $proxy['host'].":".$proxy['port'];
@@ -346,6 +349,9 @@ final class HTTP {
         }
 
         if ($cookie_file) {
+            if ((!DIRECTORY::create(dirname($cookie_file), true))&&($exception)) {
+                throw new \Exception('Unable to create directory: '.dirname($cookie_file));
+            }
             $options[CURLOPT_COOKIEJAR] = $cookie_file;
             if ((is_file($cookie_file)) && (filesize($cookie_file) > 0)) {
                 $options[CURLOPT_COOKIEFILE] = $cookie_file;
@@ -400,22 +406,24 @@ final class HTTP {
 
         $response_header = curl_getinfo($ch);
         self::setError($url, curl_errno($ch), curl_error($ch));
-        curl_close($ch);
-
-        unset($options);
 
         if ($file_handler) {
             fclose($file_handler);
             chmod($save_as_file, 0666);
             if (($cookie_file)&&(is_file($cookie_file))) { unlink($cookie_file); }
         }
+        curl_close($ch);
+        unset($options);
 
-        $ret = ($HTTP_RAW_POST_DATA != '') ? $HTTP_RAW_POST_DATA : $response;
-
+        $ret = '';
+        if ((empty($save_as_file))||(empty($binary_transfer))) {
+            $ret = ($HTTP_RAW_POST_DATA != '') ? $HTTP_RAW_POST_DATA : $response;
+        }
         self::setLastCurl($url, 'run_time', $run_time);
         self::setLastCurl($url, 'content_type', ((is_array($response_header))&&(array_key_exists('content_type', $response_header))) ? $response_header['content_type'] : '');
         self::setLastCurl($url, 'http_code', ((is_array($response_header))&&(array_key_exists('http_code', $response_header))) ? $response_header['http_code'] : false);
         self::setLastCurl($url, 'header', (($get_header)&&(is_array($response_header))) ? $response_header : []);
+
 
         $error_code = self::getError($url);
         $error_message = self::getError($url, false);
@@ -426,7 +434,8 @@ final class HTTP {
             $err_msg = "CURL error: ".$post_method." ".$url_host." ".$error_message." (request: ".$url."; error: ".$error_code."; response length: ".strlen($ret).")";
             if ((!empty($error_code))&&(!empty($exception))) {
                 if (($error_code == 28)&&(preg_match("/^Operation timed out after ([0-9]+) milliseconds/is", $error_message, $errm))) {
-                    $rtime = round((array_get($errm,1)*1)/1000,2);
+                    $xtime = ARRAYS::get($errm,1,0) *1;
+                    $rtime = round(($xtime)/1000,2);
                     $err_msg = "CURL error: ".$post_method." ".$url_host." Operation Timed out after ".$rtime."s. (request: ".$url.")";
                 }
                 throw new \Exception($err_msg);

@@ -13,6 +13,7 @@ class DB {
     private $_init = [];
     private $_state_checks = [];
     private $_next_statuses = [];
+    private $_last_state = false;
 
     private function __construct() {
         try {
@@ -44,7 +45,9 @@ class DB {
 
     private function close($force = true) {
         if (is_object($this->_link)) {
-            if ($force) { $this->_link->close(); }
+            if (($force)&&(method_exists($this->_link,'close'))) {
+                $this->_link->close();
+            }
 
             if (!empty($this->_link->thread_id)) {
                 $this->_link->kill($this->_link->thread_id);
@@ -91,6 +94,22 @@ class DB {
         return self::$_instance;
     }
 
+    public function beginTransaction() {
+        if (!$this->isCon()) { return false; }
+        $this->_link->begin_transaction();
+        return $this;
+    }
+
+    public function commit() {
+        $this->_link->commit();
+        return $this;
+    }
+
+    public function rollback() {
+        $this->_link->rollback();
+        return $this;
+    }
+
     public function init() {
         if (!$this->isCon()) { return false; }
         if (!ARRAYS::check($this->_init,'prefix','string')) { return false; }
@@ -123,6 +142,13 @@ class DB {
         catch (\mysqli_sql_exception $ex) { $this->_link->rollback(); }
     }
 
+    public function getLastState() {
+        if (empty($this->_last_state)) {
+            foreach ($this->_next_statuses AS $val) { $this->_last_state = $val; }
+        }
+        return $this->_last_state;
+    }
+
     public function getNextStatus($status) {
         if (empty($status)) { return false; }
         $new = ARRAYS::get($this->_next_statuses, $status);
@@ -137,7 +163,8 @@ class DB {
         if (empty($res)) { return false; }
         $ret = $res->fetch_assoc();
         unset($res);
-        return ARRAYS::get($ret, $field, false);
+        if (ARRAYS::check($ret, $field, false)) { return $ret[$field]; }
+        return false;
     }
 
     public function update($id, $values) {
@@ -173,7 +200,7 @@ class DB {
         return $data;
     }
 
-    public function getNext($exclude_ids = [], $engine=false) {
+    public function getNext($exclude_ids = [], $engine=false, $processed = 0, $processed_max = 0) {
         if (!$this->isCon()) { return false; }
 
         $results = [];
@@ -182,10 +209,12 @@ class DB {
         $query_end = ' ORDER BY `id` LIMIT 1 OFFSET 0';
 
         //get one new record
-        $query = $query_begin. '((`status`=\'new\') AND (`started_at` IS NULL))'.$query_end;
-        $res = $this->_link->query($query);
-        if (!empty($res)) { $results['new'] = $res->fetch_assoc(); }
-        unset($res);
+        if (($processed_max > 0)&&($processed<$processed_max)) {
+            $query = $query_begin. '((`status`=\'new\') AND (`started_at` IS NULL))'.$query_end;
+            $res = $this->_link->query($query);
+            if (!empty($res)) { $results['new'] = $res->fetch_assoc(); }
+            unset($res);
+        }
 
         if ($engine !== 'parallel') {
             //get one sent record
@@ -214,14 +243,16 @@ class DB {
 
         $res_idx = array_rand($results);
         $ret = $results[$res_idx];
+        $ret['_is_new_code_'] = false;
         unset($results);
         //update selected record -> set status and started_at
         $status = ARRAYS::get($ret, 'status');
         if ((!empty($status))&&(in_array($status, ['new']))) {
             $status = $this->getNextStatus($status);
             $this->update(ARRAYS::get($ret, 'id'), ['status'=>$status, 'started_at'=>gmdate('Y-m-d H:i:s', time())]);
+            $ret['_is_new_code_'] = true;
         }
-
+        FILE::debug('loaded next record: '.ARRAYS::get($ret, 'id'),0);
         return $ret;
     }
 

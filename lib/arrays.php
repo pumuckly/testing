@@ -25,10 +25,11 @@ final class ARRAYS {
         return false;
     }
 
-    public static function get(&$arr, $key, $default = null, $check_empty = true, $enable_array = true, $level=32) {
-        if ((!is_array($arr))||($level <= 0)||((empty($key))&&($key !== 0))) { return $default; }
+    public static function get(&$arr, $key, $default = null, $check_empty = 0, $enable_array = true, $level=32) {
+        if ((!is_array($arr))||($level <= 0)||((empty($key))&&($key !== 0)&&($key !== '0'))) { return $default; }
         if (is_array($key)) {
             $skey = array_shift($key);
+            if ($skey === '0') { $skey = 0; }
             if (!self::check($arr, $skey)) {
                 return self::get($arr, $skey, $default, $check_empty, $enable_array, ($level-1));
             }
@@ -37,10 +38,11 @@ final class ARRAYS {
                 return self::get($arr[$skey], $key, $default, $check_empty, $enable_array, ($level-1));
             }
         }
+        if ($key === '0') { $key = 0; }
         if (self::check($arr, $key, false)) {
-            if ($check_empty) {
+            if ($check_empty !== false) {
                 if ((is_array($arr[$key]))&&(count($arr[$key]) == 0)) { return false; }
-                elseif (empty($arr[$key])) { return false; }
+                elseif (($check_empty !== 0)&&(empty($arr[$key]))) { return false; }
             }
             return $arr[$key];
         }
@@ -51,7 +53,7 @@ final class ARRAYS {
         if ((is_array($searchValue))||(!is_array($source))) { return false; }
         if ((empty($subkey))&&(!in_array($searchValue, $source))) { return false; }
         foreach ($source as $skey => $sval) {
-            if (!empty($subkey)) { $sval = ARRAYS::get($sval, $subkey, false); }
+            if (!empty($subkey)) { $sval = self::get($sval, $subkey, false); }
             if ($sval == $searchValue) { return $skey; } 
         }
         return false;

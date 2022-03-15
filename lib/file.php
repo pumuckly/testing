@@ -35,7 +35,7 @@ final class FILE {
     public static function setDebugFile($storage_root=false) {
         $ds = DIRECTORY_SEPARATOR;
         if (empty($storage_root)) { $storage_root = $ds.'tmp'.$ds.'php'.$ds.'log'.$ds; }
-        $file = $storage_root.$ds.'default-'.time();
+        $file = $storage_root.(((!empty($storage_root))&&(substr($storage_root,-1,1)!==$ds))?$ds:'').'default-'.time();
 
         self::$_CONFIG['debug_file'] = $file.'.log';
     }
@@ -58,6 +58,8 @@ final class FILE {
         if (!is_array(self::$_CONFIG)) { self::$_CONFIG = []; }
         self::$_debug = ARRAYS::get($params, 'debug');
         self::$_CONFIG['debug_file'] = ARRAYS::get($params, 'file');
+        self::$_CONFIG['_global_debug_run_time_'] = ARRAYS::get($params, 'start_time');
+        self::$_CONFIG['_debug_time_level_'] = ARRAYS::get($params, 'time_level');
         self::$_CONFIG['_debug_file_use_time'] = ARRAYS::get($params, 'use_time');
         self::$_CONFIG['_debug_file_header'] = ARRAYS::get($params, 'header');
         self::$_CONFIG['_debug_file_header_var'] = ARRAYS::get($params, 'header_var');
@@ -67,6 +69,8 @@ final class FILE {
         return [
             'debug' => self::$_debug,
             'file' => self::getConfig('debug_file'),
+            'start_time' => self::getConfig('_global_debug_run_time_'),
+            'time_level' => self::getConfig('_debug_time_level_'),
             'use_time' => self::getConfig('_debug_file_use_time'),
             'header' => self::getConfig('_debug_file_header'),
             'header_var' => self::getConfig('_debug_file_header_var'),
@@ -82,7 +86,7 @@ final class FILE {
     }
 
     public static function log($source, $filename = false, $recreate = false, $level = 4, $_last_level = 0, $_is_start = true, $_only_variable = true, $_use_separator=false) {
-        if (!is_array(self::$_CONFIG)) { $_CONFIG = []; }
+        if (!is_array(self::$_CONFIG)) { self::$_CONFIG = []; }
         if (!array_key_exists('_debug_time_level_', self::$_CONFIG)) { self::$_CONFIG['_debug_time_level_'] = []; }
 
         $use_time = (($_is_start)&&(!empty(self::getConfig('_debug_file_use_time')))) ? true: false;

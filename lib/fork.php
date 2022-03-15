@@ -129,9 +129,9 @@ class FORK {
 
         //Initialize imap mail engine
         $this->_mail = null;
-        if ((ARRAYS::check($this->_config, 'imap'))&&(ARRAYS::check($this->_job_types, 'imap'))) {
+        if (ARRAYS::check($this->_config, 'imap')) {
             $this->_mail = new IMAP($this->_config['imap']);
-            if (is_object($this->_mail)) {
+            if ((is_object($this->_mail))&&(ARRAYS::check($this->_job_types, 'imap'))) {
                 $this->_mail->setJobs($this->_job_types['imap']);
             }
         }
@@ -191,9 +191,9 @@ class FORK {
     protected function getNextRecord($exclude_ids=[]) {
         FILE::debug('Get next record (Processed:  '.$this->_processed.' / '.$this->_process_max.')',1);
 
-        if ((!empty($this->_process_max))&&($this->_processed >= $this->_process_max)) { $this->error('No more records allowed to processing',1); }
+        //if ((!empty($this->_process_max))&&($this->_processed >= $this->_process_max)) { $this->error('No more records allowed to processing',1); }
 
-        $data = $this->_db->getNext($exclude_ids, $this->_engine);
+        $data = $this->_db->getNext($exclude_ids, $this->_engine, $this->_processed, $this->_process_max);
         if (!is_array($data)) { $this->error('Can not get more data from database',2); }
 
         $data['waitfile'] = $this->_waitfile_name;
@@ -202,7 +202,9 @@ class FORK {
             $data['email'] = $this->_mail->getEmail($data['code']);
         }
 
-        $this->_processed++;
+        $is_new = ARRAYS::get($data, '_is_new_code_');
+        if ($is_new) { $this->_processed++; }
+
         return $data;
     }
 
@@ -249,7 +251,7 @@ class FORK {
                                       'config'=>$this->_config,
                                       'data'=>$thread['data']
                                 ]);
-                        FILE::debug($i.' thread - started',2);
+                        FILE::debug($i.' thread - started ('.$thread['data']['id'].'/'.$thread['data']['status'].')',2);
                         continue;
                     }
                     if ($thread['future'] === false) { // no need to use this thread anymore
