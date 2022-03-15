@@ -19,6 +19,8 @@ class FORK {
 
     protected $_job_types = [];
 
+    protected $_last_id = false;
+
     protected $_waitfile = false;
     protected $_waitfile_name = false;
     protected $_waitfile_max = 0;
@@ -51,6 +53,8 @@ class FORK {
 
         if (($this->_process_max!==false)&&($threads > $this->_process_max)) { $threads = $this->_process_max; }
         if (($threads>0)&&($threads < $this->_threads_max)) { $this->_threads_max = $threads; }
+
+        $this->_last_id = 0;
 
         $this->setThreads($threads);
         $this->initSteps();
@@ -237,6 +241,12 @@ class FORK {
                 if (!$wait_threads) {
                     $setNew = $this->setThread($thread, $ids);
                     if (isset($ids)) { unset($ids); }
+
+                    if ($setNew) {
+                        $last_id = $this->_last_id;
+                        $this->_last_id = ARRAYS::get($thread, ['data','id']);
+                        if ($last_id == $this->_last_id) { sleep(1); }
+                    }
 
                     if (($thread['future'] === false)&&($thread['started'] === false)&&(!empty($thread['data']))) {
                         $thread['started'] = true;
