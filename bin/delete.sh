@@ -14,3 +14,6 @@ if [ -d ${BASEPATH} ]; then
         fi
     done
 fi
+
+find /tmp/selenium -name 'rust_mozprofile*.*' -mmin +5 -type d -exec rm -rdf {} \;
+find /tmp/selenium -name 'Temp-*.*' -mmin +5 -type d -exec rm -rdf {} \;
