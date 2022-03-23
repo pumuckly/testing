@@ -245,7 +245,9 @@ class FORK {
                     if ($setNew) {
                         $last_id = $this->_last_id;
                         $this->_last_id = ARRAYS::get($thread, ['data','id']);
-                        if ($last_id == $this->_last_id) { sleep(1); }
+                        if ($last_id == $this->_last_id) {
+                            //TODO: need next record
+                        }
                     }
 
                     if (($thread['future'] === false)&&($thread['started'] === false)&&(!empty($thread['data']))) {

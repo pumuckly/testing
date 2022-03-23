@@ -220,8 +220,8 @@ class DB {
             //get one sent record
             $query = $query_begin.
                      '(`status`=\'received\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW()-10)'.
-                   ((ARRAYS::check($this->_state_checks, 'received', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'received').'` IS NOT NULL)' : '').
-                         $query_end;
+                     ((ARRAYS::check($this->_state_checks, 'received', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'received').'` IS NOT NULL)' : '').
+                     $query_end;
             $res = $this->_link->query($query);
             if (!empty($res)) { $results['received'] = $res->fetch_assoc(); }
             unset($res);
@@ -229,7 +229,7 @@ class DB {
             //get one received record
             $query = $query_begin.
                      '(`status`=\'processed\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW()-10)'.
-                     ((ARRAYS::check($this->_state_checks, 'rprocessed', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'processed').'` IS NOT NULL)' : '').
+                     ((ARRAYS::check($this->_state_checks, 'processed', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'processed').'` IS NOT NULL)' : '').
                      $query_end;
             $res = $this->_link->query($query);
             if (!empty($res)) { $results['processed'] = $res->fetch_assoc(); }

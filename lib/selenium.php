@@ -25,7 +25,7 @@ class SELENIUM {
     private $_dl_dir = '';
     
     public function __construct($conf) {
-        $this->_server = ARRAYS::get($conf, 'server');
+        $this->_server = ARRAYS::get($conf, 'server'); //Maybe set default to: http://localhost:4444/
         if (empty($this->_server)) { throw new \Exception('Can not setup Selenium server URL'); }
         $this->_types = ARRAYS::get($conf, 'types');
         if (!ARRAYS::check($this->_types)) { $this->_types = ['chrome']; }
@@ -128,7 +128,13 @@ class SELENIUM {
                 case 'firefox':
                         $this->_type = $type;
 
+                        putenv("webdriver.firefox.profile=default");
+                        putenv("webdriver.gecko.driver=/usr/bin/geckodriver");
+
                         $profile = new FirefoxProfile();
+                        $profile->setPreference('webdriver.firefox.profile', 'default');
+                        $profile->setPreference('webdriver.gecko.driver', '/usr/bin/geckodriver');
+
                         $profile->setPreference('browser.download.folderList', 2);
                         $profile->setPreference('browser.download.dir', $this->_dl_dir);
                         $profile->setPreference('browser.helperApps.neverAsk.saveToDisk', 'application/pdf');
@@ -140,14 +146,15 @@ class SELENIUM {
 
                         $options = new FirefoxOptions();
                         //$options->addArguments(['-headless']);
-                        $options->addArguments(["--remote-debugging-port=9222"]);
+                        $options->addArguments(['--remote-debugging-port=9222']);
+                        $options->addArguments(['--marionette=true']);
 
                         $desiredCapabilities = DesiredCapabilities::firefox();
-                        //$desiredCapabilities->setCapability('acceptSslCerts', false);
-                        $desiredCapabilities->setCapability(FirefoxDriver::PROFILE, $profile);
-                        unset($profile);
+                        $desiredCapabilities->setCapability('acceptSslCerts', false);
                         $desiredCapabilities->setCapability(FirefoxOptions::CAPABILITY, $options);
                         unset($options);
+                        $desiredCapabilities->setCapability(FirefoxDriver::PROFILE, $profile);
+                        unset($profile);
                     break;
 
                 default:  break;
@@ -156,6 +163,12 @@ class SELENIUM {
             if (empty($desiredCapabilities)) { throw new \Exception('Unknown Selenium engine: '.$type); }
 
             $this->_driver = RemoteWebDriver::create($this->_server, $desiredCapabilities);
+
+            switch ($this->_type) {
+                case 'firefox':
+                        $this->_driver->manage()->window()->maximize();
+                    break;
+            }
 
             if ((!is_object($this->_driver))||(empty($this->_driver->getSessionID()))) { 
                 throw new \Exception('Unable to create Seleniun test environment ('.$type.')');
