@@ -156,6 +156,18 @@ class DB {
         return false;
     }
 
+    public function getSentRecords($engine = false, $type=false) {
+        $query = 'SELECT COUNT(id) AS `cnt` FROM `'.$this->_main.'`WHERE (`status` IN (\'sent\',\'received\',\'processed\'))';
+        if ((!empty($type))&&(!empty($engine))&&($engine == 'selenium')) { $query .= ' AND (`engine` = \''.$type.'\')'; }
+        $res = $this->_link->query($query);
+        if (empty($res)) { return false; }
+        $ret = $res->fetch_assoc();
+        unset($res);
+        $cnt = ARRAYS::get($ret, 'cnt');
+        $cnt = MATH::num($cnt);
+        return $cnt;
+    }
+
     public function getField($id, $field) {
         if (!$this->isCon()) { return false; }
         $query = 'SELECT `id`, `code`, `'.$field.'` FROM `'.$this->_main.'` WHERE (`id`=\''.$id.'\') ORDER BY `id` LIMIT 1 OFFSET 0';
@@ -200,42 +212,49 @@ class DB {
         return $data;
     }
 
-    public function getNext($exclude_ids = [], $engine=false, $processed = 0, $processed_max = 0) {
+    public function getNext($exclude_ids = [], $engine=false, $processed = 0, $processed_max = 0, $type = false, $step = false) {
         if (!$this->isCon()) { return false; }
 
         $results = [];
-        $query_begin = 'SELECT `id`, `code`, `status` FROM `'.$this->_main.'` WHERE ';
+        $query_begin = 'SELECT `id`, `code`, `status`';
+        if ($engine == 'selenium') { $query_begin .= ', `engine`'; }
+        $query_begin .= ' FROM `'.$this->_main.'` WHERE ';
         if (ARRAYS::check($exclude_ids)) { $query_begin .= '(`id` NOT IN (\''.implode('\',\'',$exclude_ids).'\')) AND '; }
+        $query_where = '';
+        if (($engine == 'selenium')&&(!empty($type))) { $query_where .= ' (`engine`=\''.$type.'\') AND '; }
         $query_end = ' ORDER BY `id` LIMIT 1 OFFSET 0';
 
         //get one new record
-        if (($processed_max > 0)&&($processed<$processed_max)) {
+        if (($processed_max > 0)&&($processed<$processed_max)&&((empty($step))||($step == 'new'))) {
             $query = $query_begin. '((`status`=\'new\') AND (`started_at` IS NULL))'.$query_end;
             $res = $this->_link->query($query);
             if (!empty($res)) { $results['new'] = $res->fetch_assoc(); }
             unset($res);
         }
 
-        if ($engine !== 'parallel') {
+        if ($engine == 'selenium') {
             //get one sent record
-            $query = $query_begin.
-                     '(`status`=\'received\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW()-10)'.
-                     ((ARRAYS::check($this->_state_checks, 'received', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'received').'` IS NOT NULL)' : '').
-                     $query_end;
-            $res = $this->_link->query($query);
-            if (!empty($res)) { $results['received'] = $res->fetch_assoc(); }
-            unset($res);
+            if ((empty($step))||(in_array($step, ['received']))) {
+                $query = $query_begin.$query_where.
+                         '(`status`=\'received\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW())'.
+                         ((ARRAYS::check($this->_state_checks, 'received', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'received').'` IS NOT NULL)' : '').
+                         $query_end;
+                $res = $this->_link->query($query);
+                if (!empty($res)) { $results['received'] = $res->fetch_assoc(); }
+                unset($res);
+            }
 
             //get one received record
-            $query = $query_begin.
-                     '(`status`=\'processed\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW()-10)'.
-                     ((ARRAYS::check($this->_state_checks, 'processed', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'processed').'` IS NOT NULL)' : '').
-                     $query_end;
-            $res = $this->_link->query($query);
-            if (!empty($res)) { $results['processed'] = $res->fetch_assoc(); }
-            unset($res);
+            if ((empty($step))||($step == 'processed')) {
+                $query = $query_begin.$query_where.
+                         '(`status`=\'processed\') AND (`started_at` IS NOT NULL) AND (`started_at` <= NOW())'.
+                         ((ARRAYS::check($this->_state_checks, 'processed', 'string')) ? ' AND (`'.ARRAYS::get($this->_state_checks, 'processed').'` IS NOT NULL)' : '').
+                         $query_end;
+                $res = $this->_link->query($query);
+                if (!empty($res)) { $results['processed'] = $res->fetch_assoc(); }
+                unset($res);
+            }
         }
-
         foreach ($results as $key => $res_data) {
             if (!ARRAYS::check($res_data)) { unset($results[$key]); }
         }
@@ -249,8 +268,13 @@ class DB {
         $status = ARRAYS::get($ret, 'status');
         if ((!empty($status))&&(in_array($status, ['new']))) {
             $status = $this->getNextStatus($status);
-            $this->update(ARRAYS::get($ret, 'id'), ['status'=>$status, 'started_at'=>gmdate('Y-m-d H:i:s', time())]);
+            $params = ['status'=>$status, 'started_at'=>gmdate('Y-m-d H:i:s', time())];
+            if (($engine == 'selenium')&&(!empty($type))) { $params['engine'] = $type; }
+            $this->update(ARRAYS::get($ret, 'id'), $params);
             $ret['_is_new_code_'] = true;
+        }
+        if (in_array($status, ['new','received','processed'])) {
+            $ret['_step_'] = $status;
         }
         FILE::debug('loaded next record: '.ARRAYS::get($ret, 'id'),0);
         return $ret;

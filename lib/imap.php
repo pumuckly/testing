@@ -19,6 +19,7 @@ class IMAP {
     protected $_links = [];
 
     protected $_waiting_time = 30;
+    protected $_process_error = false;
 
     protected $_jobs = [];
 
@@ -160,12 +161,17 @@ class IMAP {
     }
 
     public function process() {
-        if ((time() - $this->_timer) < $this->_waiting_time) { return false; }
+        $waits = $this->_waiting_time - (time() - $this->_timer);
+        if ($waits > 0) {
+            FILE::debug('Email processing done. Waiting for '.$waits.' sec for check nexts',1);
+            sleep($waits);
+        }
         $this->_timer = time();
-        FILE::debug('Checking emails...',2);
+        FILE::debug('Checking emails...',4);
         try {
             $this->check();
             $this->close();
+            $this->_timer = time();
         }
         catch (\Exception $ex) {
             FILE::debug('IMAP Error: '.$ex->getMessage(),5);
@@ -174,20 +180,21 @@ class IMAP {
 
     public function check() {
         if (!$this->isCon()) { return false; }
-
-        $emails = imap_search($this->_link, 'UNSEEN FROM "'.$this->_sender.'"');
-
-        $error = imap_last_error();
-        if (!empty($error)) { throw new \Exception('IMAP error: '.$error); }
-        if (empty($emails)) { return false; }
-
-        rsort($emails);
-        $changed = false;
-        if (count($emails) > 25) { FILE::debug('Found more than 25 emails. Total: '.count($emails),3); }
+        $this->_process_error = false;
         try {
+            $emails = imap_search($this->_link, 'UNSEEN FROM "'.$this->_sender.'"');
+            $lerror = imap_last_error();
+            if (!empty($lerror)) { throw new \Exception('IMAP error: '.$lerror); }
+            if (empty($emails)) { return false; }
+
+            rsort($emails);
+            $changed = false;
+            if (count($emails) > 25) { FILE::debug('Found more than 25 emails. Total: '.count($emails),3); }
+
             foreach ($emails as $mail_id) {
                 $overview = imap_fetch_overview($this->_link, $mail_id, 0);
                 if ((!is_array($overview))||(!array_key_exists(0, $overview))) { continue; }
+
                 $from = $to = $subject = '';
                 $_from = imap_mime_header_decode($overview[0]->from);
                 foreach ($_from as $obj) { $from .= $obj->text; }
@@ -269,8 +276,18 @@ class IMAP {
                 FILE::debug('email processed: from: '.$from.'; to: '.$to.'; subject: '.$subject_key.'; code: '.$code.'; arrived: '.$time.'; link: '.$link, 0);
             }
         }
-        catch (\Exception $ex) { FILE::debug('Mail processing error: '.$ex->getMessage(),4); }
-        if ($changed) { imap_expunge($this->_link); }
+        catch (\Exception $ex) {
+            $this->_process_error = $ex->getMessage();
+            FILE::debug('Mail processing error: '.$this->_process_error,5);
+        }
+
+        try {
+          if (($changed)&&(!empty($this->_link))) { imap_expunge($this->_link); }
+        }
+        catch (\Exception $ex) {
+            $this->_process_error = $ex->getMessage();
+            FILE::debug('Mail processing error: '.$this->_process_error,5);
+        }
     }
 
     public function searchKey($key, $subject_filter) {

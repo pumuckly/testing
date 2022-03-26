@@ -64,6 +64,8 @@ do_start()
         chown develop:builder ${TMPDIR}/cookies
     fi
 
+    ulimit -S -n 1048576
+
     # Return
     #   0 if daemon has been started
     #   2 if daemon could not be started

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-BASEPATH="/tmp/selenium/cookies"
+ROOTPATH="/tmp/selenium"
+BASEPATH="${ROOTPATH}/cookies"
 
 if [ -d ${BASEPATH} ]; then
     for entry in "${BASEPATH}"/*.delete.flag
@@ -15,5 +16,8 @@ if [ -d ${BASEPATH} ]; then
     done
 fi
 
-find /tmp/selenium -name 'rust_mozprofile*.*' -mmin +5 -type d -exec rm -rdf {} \;
-find /tmp/selenium -name 'Temp-*.*' -mmin +5 -type d -exec rm -rdf {} \;
+find ${ROOTPATH} -name 'Temp-*' -mmin +3 -type d -exec rm -rf {} \;
+find ${ROOTPATH} -name 'rust_mozprofile*' -mmin +3 -type d -exec rm -rf {} \;
+find ${BASEPATH} -name 'firefox.*' -mmin +3 -type d -exec rm -rf {} \;
+find ${ROOTPATH} -name '.com.google.Chrome.*' -mmin +3 -type d -exec rm -rf {} \;
+find ${BASEPATH} -name 'chrome.*' -mmin +3 -type d -exec rm -rf {} \;

@@ -15,7 +15,12 @@ final class PROCESS {
         if (func_num_args() !== 3) { return false; }
         $thread = func_get_arg(0);
         if (!ARRAYS::check($thread)) { return false; }
+
+        $process_time = 0 - microtime(true);
+
         $thread_id = ARRAYS::get($thread, 'id');
+        $thread_type = ARRAYS::get($thread, 'type');
+        $thread_step = ARRAYS::get($thread, 'step');
         $log_params = ARRAYS::get($thread, 'log');
         FILE::logSetParam($log_params);
         unset($log_params);
@@ -23,8 +28,9 @@ final class PROCESS {
         if (!ARRAYS::check($config)) { return false; }
 
         $data = func_get_arg(2);
-        $record_id = ARRAYS::get($data,'id');
-        $status = ARRAYS::get($data,'status');
+        $record_id = ARRAYS::get($data, 'id');
+        $session_id = ARRAYS::get($data, 'session_id');
+        $status = ARRAYS::get($data, 'status');
         if ((empty($record_id))||($record_id <= 0)) { return false; }
 
         $engine_code = false;
@@ -33,7 +39,7 @@ final class PROCESS {
         if (ARRAYS::check($_engine, 'selenium')) {
             $engine_cfg = ARRAYS::get($_engine,['selenium']);
             $engine_code = 'selenium';
-            if (!ARRAYS::check($engine_cfg,'server','string')) { return false; }
+            if (!ARRAYS::check($engine_cfg,'types')) { return false; }
         }
         elseif (ARRAYS::check($_engine, 'parallel')) {
             $engine_cfg = ARRAYS::get($_engine,['parallel']);
@@ -42,22 +48,16 @@ final class PROCESS {
 
         $db = DB::getInstance($config['db']);
 
-        FILE::debug($thread_id.'. thread begin with record id: '.$record_id.' - '.memory_get_usage(true), 3);
+        FILE::debug($thread_id.'. thread begin with record id: '.$record_id.' - '.$thread_type.' - '.memory_get_usage(true), 3);
 
-        $terminate = false;
-        $step_keys = [];
+        $engine = false;
         foreach ($config['steps'] as $key => $substep) {
-
+            if ($engine !== false) { break; }
             $allowed_step = false;
             $allowed_statuses = ARRAYS::get($substep, ['_', 'status']);
-            if ((ARRAYS::check($allowed_statuses))&&(in_array($status, $allowed_statuses))) {
-                 $allowed_step = true;
-            }
-
+            if ((ARRAYS::check($allowed_statuses))&&(in_array($status, $allowed_statuses))) { $allowed_step = true; }
             if (empty($allowed_step)) { continue; }
-            if ($terminate) { break; }
 
-            $engine = false;
             foreach ($substep as $step => $task) {
                 $type = ARRAYS::get($task, 'type');
                 if (empty($type)) { continue; }
@@ -66,9 +66,20 @@ final class PROCESS {
                 if ($engine_code !== $e_code) { continue; }
                 $model = ARRAYS::get(self::$_engine_detect, [$type,'model']);
                 if (empty($model)) { continue; }
-                $engine = new $model($engine_cfg);
+                $engine = new $model($engine_cfg, $thread_type, $session_id);
                 break;
             }
+        }
+
+        $terminate = false;
+        $step_keys = [];
+        $step_key = false;
+        foreach ($config['steps'] as $key => $substep) {
+            $allowed_step = false;
+            $allowed_statuses = ARRAYS::get($substep, ['_', 'status']);
+            if ((ARRAYS::check($allowed_statuses))&&(in_array($status, $allowed_statuses))) { $allowed_step = true; }
+            if (empty($allowed_step)) { continue; }
+            if ($terminate) { break; }
 
             try {
                 $res = [];
@@ -90,10 +101,10 @@ final class PROCESS {
                     $method = 'processStep'.ucfirst($type);
                     if (!method_exists('Pumuckly\Testing\PROCESS', $method)) { throw new \Exception('Unknown method: '.$method); }
 
-                    $res = PROCESS::$method($db, $engine, $params, $data, $record_id, $engine_code);
+                    $res = self::$method($db, $engine, $params, $data, $record_id, $engine_code);
                     if (!is_array($res)) { throw new \Exception('No result for step: '.$step_key); }
 
-                    PROCESS::processResult($res, $db, $params, $record_id, $step_key, $type);
+                    self::processResult($res, $db, $params, $record_id, $step_key, $type);
                     unset($params);
                 }
 
@@ -109,14 +120,16 @@ final class PROCESS {
                 FILE::debug('Processing job error. Thread: '.$thread_id.' Error: '.$ex->getMessage().' - '.memory_get_usage(true),4);
                 $terminate = true;
             }
-            if (isset($engine)) {
-                if ((is_object($engine))&&(method_exists($engine, 'close'))) {
-                    $engine->close();
-                }
-                unset($engine);
-            }
         }
-        print("processed: ".$data['id'].' / '.$data['code'].' - '.memory_get_usage(true)."\n");
+
+        if (isset($engine)) {
+            if ((empty($session_id))&&(is_object($engine))&&(method_exists($engine, 'close'))) { $engine->close(); }
+            unset($engine);
+        }
+        $process_time += microtime(true);
+        $r_msg = "processed: ".$data['id'].' / '.$data['code'].' - Thread: '.$thread_id.'/'.$thread_type.' - total time: '.$process_time.' - RAM: '.memory_get_usage(true).($terminate ? ' Terminated at: '.$step_key : '');
+        FILE::debug($r_msg, 6);
+        print($r_msg."\n");
         return true;
     }
 
@@ -184,7 +197,6 @@ final class PROCESS {
             if ((empty($link))||($link === true)&&($link === 1)||($link == '1')) { throw new \Exception('Mo base URL set for step: '.$step); }
 
             if (self::$_debug) { FILE::debug('step openlink: '.$link, 0); }
-
 
             $proc = $engine->getUrl($link);
             $res['timer'] = ARRAYS::get($proc, 'timer');
@@ -263,7 +275,7 @@ final class PROCESS {
                     }
                     if (is_array($value)) { $value = false; }
 
-                    $proc = $engine->clickXpath($xpath, $value, $noerror);
+                    $tmp = $engine->clickXpath($xpath, $value, $noerror);
                 }
             }
 

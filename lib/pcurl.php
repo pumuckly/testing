@@ -11,7 +11,7 @@ class PCURL {
     protected $_results = [];
     protected $_links = [];
 
-    public function __construct($conf) {
+    public function __construct($conf, $type_key=false, $session_id = false) {
         $this->useragent = ARRAYS::get($conf, 'useragent');
         if (empty($this->useragent)) { $this->useragent = false; }
 

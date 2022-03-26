@@ -5,8 +5,9 @@ namespace Pumuckly\Testing;
 class TEST {
 
     protected $_config = [];
+    protected $_step = false;
 
-    public function __construct($cfg_file) {
+    public function __construct($cfg_file, $step = false) {
         $this->_config = FILE::parseFileJSON($cfg_file);
         if (!is_array($this->_config)) { throw new \Exception('Wrong configuration file!'); }
         if ((!array_key_exists('db',$this->_config))||(!is_array($this->_config['db']))||(count($this->_config['db'])<4)) { throw new \Exception('No database configuration!'); }
@@ -15,6 +16,8 @@ class TEST {
 
         $this->_config['steps'] = $this->_config['job']['steps'];
         unset($this->_config['job']['steps']);
+
+        $this->_step = $step;
     }
 
     public function __destruct() {
@@ -29,7 +32,7 @@ class TEST {
     }
 
     public function start() {
-        $fork = new FORK($this->_config);
+        $fork = new FORK($this->_config, $this->_step);
     }
 
 }

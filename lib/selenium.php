@@ -11,6 +11,7 @@ use Facebook\WebDriver\Firefox\FirefoxOptions;
 use Facebook\WebDriver\Firefox\FirefoxProfile;
 use Facebook\WebDriver\WebDriverBy;
 use Facebook\WebDriver\WebDriverExpectedCondition;
+use Facebook\WebDriver\WebDriverKeys;
 
 class SELENIUM {
 
@@ -23,26 +24,61 @@ class SELENIUM {
     private $_base_dir = '';
     private $_user_dir = '';
     private $_dl_dir = '';
-    
-    public function __construct($conf) {
-        $this->_server = ARRAYS::get($conf, 'server'); //Maybe set default to: http://localhost:4444/
-        if (empty($this->_server)) { throw new \Exception('Can not setup Selenium server URL'); }
-        $this->_types = ARRAYS::get($conf, 'types');
-        if (!ARRAYS::check($this->_types)) { $this->_types = ['chrome']; }
 
-        $self_signed = (!empty(ARRAYS::get($conf, 'selfsigned'))) ? true : false;
-        $type_idx = array_rand($this->_types);
+    private $_session_id = false;
+    private $_init_session = false;
+    private $_self_signed = false;
+    
+    public function __construct($conf, $type_key=false, $session_id=false) {
+
+        $this->_types = ARRAYS::get($conf, 'types');
+        if (!ARRAYS::check($this->_types)) {
+              $this->_types = ['chrome'=>'http://localhost:4444/', 'firefox'=>'http://localhost:4444/'];
+        }
+        if ((!empty($type_key))&&(!array_key_exists($type_key, $this->_types))) { $type_key = false; }
+
+        $this->_server = ARRAYS::get($this->_types, $type_key);
+        if (empty($this->_server)) { throw new \Exception('Can not setup Selenium server URL'); }
+
+        $this->_self_signed = (!empty(ARRAYS::get($conf, 'selfsigned'))) ? true : false;
         $base_dir = ARRAYS::get($conf, 'basedir');
 
-        $this->initDriver($this->_types[$type_idx], $self_signed, $base_dir);
+        $this->_init_session = false;
+        if (!empty($session_id)) { $this->_init_session = $session_id; }
+
+        $type = $this->getTypeCode($type_key);
+
+        $repeat = 2;
+        $init = false;
+        while ((0 <= $repeat--)&&($init !== true)) {
+            $init = $this->initDriver($type, $base_dir);
+        }
+        if ($init !== true) { throw new \Exception($type.' selenium unable to connect to renderer'); }
     }
 
     public function __destruct() {
-        $this->close();
+        if (empty($this->_init_session)) {
+            $this->close();
+        }
     }
 
     public function close() {
         $this->closeDriver();
+    }
+
+    public function getSessionID() {
+        return $this->_session_id;
+    }
+
+    protected function getTypeCode($type_key = false) {
+        $type_idx = array_rand($this->_types);
+        $type = $this->_types[$type_idx];
+        if ((!empty($type_key))&&(array_key_exists($type_key, $this->_types))) { $type = $type_key; }
+
+        $this->_server = ARRAYS::get($this->_types, $type);
+        if (empty($this->_server)) { throw new \Exception('Can not setup Selenium server URL fot type: '.$type); }
+
+        return $type;
     }
 
     protected function initBaseDir($base_dir) {
@@ -62,125 +98,182 @@ class SELENIUM {
             $this->_driver->quit();
             unset($this->_driver);
         }
-        if ((!empty($this->_dl_dir))&&(is_dir($this->_dl_dir))) {
-            //TODO: remove completely
-        }
-        if ((!empty($this->_user_dir))&&(is_dir($this->_user_dir))) {
-            //TODO: remove completely
-        }
         $this->_driver = null;
 
         if ((!empty($this->_user_dir))&&(is_dir($this->_user_dir))) {
             DIRECTORY::delete($this->_user_dir, true, $this->_base_dir, true);
             $this->_user_dir = false;
         }
+        usleep(500000);
     }
 
-    protected function initDriver($type, $self_signed = false, $base_dir = '') {
+    protected function getChromeOptions() {
+        $options = new ChromeOptions();
+        $prefs = ['download.default_directory' => $this->_dl_dir];
+        $options->setExperimentalOption('prefs',$prefs);
+        unset($prefs);
+
+        $options->addArguments(['--start-maximized']);
+        $options->addArguments(['--no-sandbox']);
+        $options->addArguments(['--disable-setuid-sandbox']);
+        $options->addArguments(['--remote-debugging-port=9222']);
+        $options->addArguments(['--disable-dev-shm-using']);
+        $options->addArguments(['--disable-gpu']);
+        $options->addArguments(['--disable-extensions']);
+        $options->addArguments(['start-maximized']);
+        $options->addArguments(['disable-infobars']);
+        $options->addArguments(['user-data-dir='.$this->_user_dir]);
+        $options->addArguments(['applicationCacheEnabled=0']);
+        //$options->addArguments(['pageLoadStrategy=0']);
+
+        if (!empty($this->_self_signed)) {
+            $options->addArguments(['--ignore-certificate-errors']);
+            $options->addArguments(['acceptInsecureCerts=true']);
+        }
+
+        $desiredCapabilities = DesiredCapabilities::chrome();
+        $desiredCapabilities->setCapability(ChromeOptions::CAPABILITY, $options);
+        unset($options);
+        return $desiredCapabilities;
+    }
+
+    protected function getFirefoxOptions() {
+        putenv('webdriver.firefox.profile=default');
+        //putenv('webdriver.gecko.driver=/usr/bin/geckodriver');
+
+        $profile = new FirefoxProfile();
+        $profile->setPreference('webdriver.firefox.profile', 'default');
+        //$profile->setPreference('webdriver.gecko.driver', '/usr/bin/geckodriver');
+
+        $profile->setPreference('browser.startup.homepage', 'about:blank');
+        $profile->setPreference('browser.download.folderList', 2);
+        $profile->setPreference('browser.download.dir', $this->_dl_dir);
+        $profile->setPreference('browser.helperApps.neverAsk.saveToDisk', 'application/pdf');
+
+        ////disable caches
+        $profile->setPreference('pdfjs.enabledCache.state', false);
+        $profile->setPreference('network.http.use-cache', false);
+        $profile->setPreference('browser.cache.disk.enable', false);
+        $profile->setPreference('browser.cache.offline.enable', false);
+        //$profile->setPreference('browser.cache.memory.enable', false);
+
+        $options = new FirefoxOptions();
+        //$options->addArguments(['-headless']);
+        $options->addArguments(['--remote-debugging-port=9222']);
+        $options->addArguments(['--marionette=true']);
+
+        $desiredCapabilities = DesiredCapabilities::firefox();
+        if (!empty($this->_self_signed)) {
+            //$profile->setPreference('accept_untrusted_certs',true);
+            $desiredCapabilities->setCapability('acceptInsecureCerts', true);
+            $desiredCapabilities->setCapability('acceptSslCerts', true);
+        }
+        $desiredCapabilities->setCapability(FirefoxOptions::CAPABILITY, $options);
+        unset($options);
+        $desiredCapabilities->setCapability(FirefoxDriver::PROFILE, $profile);
+        unset($profile);
+        return $desiredCapabilities;
+    }
+
+    protected function initDriver($type, $base_dir = '') {
         try {
-            $this->closeDriver();
+            if (empty($this->_init_session)) {
+                $this->closeDriver();
+            }
 
             $this->initBaseDir($base_dir);
 
+            $this->_user_dir = false;
+
             $this->_dl_dir = $this->_base_dir.'downloads';
-            $this->_user_dir = $this->_base_dir.'cookies'.DIRECTORY_SEPARATOR.$type.'.'.microtime(true).mt_rand(100000,150000);
-            if (!is_dir($this->_dl_dir)) {
-                DIRECTORY::create($this->_dl_dir, true);
+            if (!is_dir($this->_dl_dir)) { DIRECTORY::create($this->_dl_dir, true); }
+
+            if (!empty($this->_init_session)) {
+                $this->_driver = RemoteWebDriver::createBySessionID($this->_init_session, $this->_server);
+                $this->_type = $type;
             }
-            if (!is_dir($this->_user_dir)) {
-                DIRECTORY::create($this->_user_dir, true);
+            else {
+                $this->_user_dir = $this->_base_dir.'cookies'.DIRECTORY_SEPARATOR.$type.'.'.microtime(true).mt_rand(100000,150000);
+                if (!is_dir($this->_user_dir)) { DIRECTORY::create($this->_user_dir, true); }
+
+                $desiredCapabilities = false;
+                switch ($type) {
+                    case 'chrome':
+                            $this->_type = $type;
+                            $desiredCapabilities = $this->getChromeOptions($this->_dl_dir, $this->_user_dir);
+                        break;
+
+                    case 'firefox':
+                            $this->_type = $type;
+                            $desiredCapabilities = $this->getFirefoxOptions($this->_dl_dir, $this->_user_dir);
+                        break;
+
+                    default:  break;
+                }
+
+                if (empty($desiredCapabilities)) { throw new \Exception('Unknown Selenium engine: '.$type); }
+
+                $this->_driver = RemoteWebDriver::create($this->_server, $desiredCapabilities, 30000);
             }
+            if ((!is_object($this->_driver))||(empty($this->_driver->getSessionID()))) {
+                throw new \Exception('Unable to create/load Seleniun test environment ('.$type.')');
+            }
+            $this->_session_id = $this->_driver->getSessionID();
+            FILE::debug($this->_session_id.' created ('.$this->_type.') page initialized.', 3);
 
-            $desiredCapabilities = false;
-            switch ($type) {
-                case 'chrome':
-                        $this->_type = $type;
-
-                        $options = new ChromeOptions();
-                        $prefs = [
-                            'download.default_directory' => $this->_dl_dir,
-                        ];
-                        $options->setExperimentalOption('prefs',$prefs);
-                        unset($prefs);
-
-                        $options->addArguments(['--start-maximized']);
-                        $options->addArguments(['--no-sandbox']);
-                        $options->addArguments(['--disable-setuid-sandbox']);
-                        $options->addArguments(['--remote-debugging-port=9222']);
-                        $options->addArguments(['--disable-dev-shm-using']);
-                        $options->addArguments(['--disable-extensions']);
-                        $options->addArguments(['--disable-gpu']);
-                        $options->addArguments(['start-maximized']);
-                        $options->addArguments(['disable-infobars']);
-                        $options->addArguments(['user-data-dir='.$this->_user_dir]);
-                        $options->addArguments(['applicationCacheEnabled=0']);
-
-                        if (!empty($self_signed)) {
-                            $options->addArguments(['--ignore-certificate-errors']);
-                            $options->addArguments(['acceptInsecureCerts=true']);
-                        }
-
-                        $desiredCapabilities = DesiredCapabilities::chrome();
-                        $desiredCapabilities->setCapability(ChromeOptions::CAPABILITY, $options);
-                        unset($options);
-                    break;
-
-                case 'firefox':
-                        $this->_type = $type;
-
-                        putenv("webdriver.firefox.profile=default");
-                        putenv("webdriver.gecko.driver=/usr/bin/geckodriver");
-
-                        $profile = new FirefoxProfile();
-                        $profile->setPreference('webdriver.firefox.profile', 'default');
-                        $profile->setPreference('webdriver.gecko.driver', '/usr/bin/geckodriver');
-
-                        $profile->setPreference('browser.download.folderList', 2);
-                        $profile->setPreference('browser.download.dir', $this->_dl_dir);
-                        $profile->setPreference('browser.helperApps.neverAsk.saveToDisk', 'application/pdf');
-                        $profile->setPreference('pdfjs.enabledCache.state', false);
-
-                        if (!empty($self_signed)) {
-                            $profile->setPreference('accept_untrusted_certs',true);
-                        }
-
-                        $options = new FirefoxOptions();
-                        //$options->addArguments(['-headless']);
-                        $options->addArguments(['--remote-debugging-port=9222']);
-                        $options->addArguments(['--marionette=true']);
-
-                        $desiredCapabilities = DesiredCapabilities::firefox();
-                        $desiredCapabilities->setCapability('acceptSslCerts', false);
-                        $desiredCapabilities->setCapability(FirefoxOptions::CAPABILITY, $options);
-                        unset($options);
-                        $desiredCapabilities->setCapability(FirefoxDriver::PROFILE, $profile);
-                        unset($profile);
-                    break;
-
-                default:  break;
+            if (empty($this->_init_session)) {
+                switch ($this->_type) {
+                    case 'firefox':
+                            $this->_driver->manage()->window()->maximize();
+                        break;
+                }
+                //FILE::debug('new blank page ('.$this->_type.').', 3);
+                //$this->_driver->get('about:blank');
             }
 
-            if (empty($desiredCapabilities)) { throw new \Exception('Unknown Selenium engine: '.$type); }
+            if (!empty($this->_init_session)) { $this->clearCache(); }
 
-            $this->_driver = RemoteWebDriver::create($this->_server, $desiredCapabilities);
-
-            switch ($this->_type) {
-                case 'firefox':
-                        $this->_driver->manage()->window()->maximize();
-                    break;
-            }
-
-            if ((!is_object($this->_driver))||(empty($this->_driver->getSessionID()))) { 
-                throw new \Exception('Unable to create Seleniun test environment ('.$type.')');
-            }
+            FILE::debug('initializing complete ('.$this->_type.') page initialized.', 3);
         }
         catch (\Exception $ex) {
+            $error = $ex->getMessage();
+            if (preg_match("/unable to connect to renderer/", $error)) {
+                FILE::debug($type.' selenium connection error, retry after 3 sec: '.$error,5);
+                sleep(5);
+                return 'retry';
+            } else {
+                FILE::debug($type.' selenium error: '.$error,5);
+                $this->closeDriver();
+                throw new \Exception('Selenium error: '.$error);
+            }
+        }
+        return true;
+    }
+
+    public function clearCache() {
+        try {
+    //        $cookies = $this->_driver->manage()->getCookies();
+    //        var_dump($cookies);
+    //        $this->_driver->manage()->deleteAllCookies();
+    //        usleep(250000);
+            switch ($this->_type) {
+                case 'chrome':
+                        // $this->_driver->get("chrome://settings/clearBrowserData");
+                        // $element = $this->_driver->findElement(WebDriverBy::xpath("//settings-ui"));
+                        // if (!empty($element)) { $element->sendKeys(WebDriverKeys::ENTER); }
+                    break;
+
+                case 'firefox':
+                    break;
+            }
+        } catch (\Exception $ex) {
             $this->closeDriver();
-            throw new \Exception('Selenium error: '.$ex->getMessage());
+            throw new \Exception("Selenium cache error: ".$ex->getMessage());
         }
     }
 
     public function screenshoot($filename=false) {
+        usleep(250000);
         if (empty($filename)) { $filename = 'screenshoot_'.microtime(true).mt_rand(10000,99999).'.png'; }
         $fname = DIRECTORY_SEPARATOR.'tmp'.DIRECTORY_SEPARATOR.$filename;
         $this->_driver->takeScreenshot($fname);
@@ -271,11 +364,13 @@ class SELENIUM {
             $timer_init = 0.0 - microtime(true);
             $this->_driver->get($url);
             $timer = $timer_init + microtime(true);
+            usleep(100000); //0.1 sec for render page
             $res['title'] = $this->_driver->getTitle();
         }
         catch (\Exception $ex) {
             $timer = $timer_init + microtime(true);
-            $res['error'] = $ex->getMessage(); 
+            $res['error'] = "url error, screenshoot taken: "$ex->getMessage();
+            $this->screenshoot();
         }
         $res['timer'] = $timer;
         return $res;
@@ -287,11 +382,12 @@ class SELENIUM {
             $element = $this->_driver->findElement(WebDriverBy::xpath($xpath));
             if ((!isset($element))||(empty($element))) { throw new \Exception('No xpath selected button found in the site!'); }
 
+            usleep(100000); //0.1 sec for wait page
             FILE::debug('Clicking on: '.$xpath, 0);
             $timer_init = 0.0 - microtime(true);
             $element->click();
             if ($noError) {
-                $this->_driver->manage()->timeouts()->implicitlyWait(2);
+                $this->_driver->manage()->timeouts()->implicitlyWait(1);
             }
             if (($setValue !== false)&&(!is_array($setValue))) {
                 $this->_driver->manage()->timeouts()->implicitlyWait(1);
@@ -300,13 +396,15 @@ class SELENIUM {
             }
             $timer = $timer_init + microtime(true);
             unset($element);
+            usleep(200000); //0.2 sec for wait animation
 
             $res['title'] = $this->_driver->getTitle();
         }
         catch (\Exception $ex) {
             $timer = null;
             if ($noError) { return []; }
-            $res['error'] = $ex->getMessage(); 
+            $res['error'] = "xpath error, screenshoot taken: ".$ex->getMessage();
+            $this->screenshoot();
         }
         $res['timer'] = $timer;
         return $res;
