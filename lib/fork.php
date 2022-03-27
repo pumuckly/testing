@@ -235,11 +235,7 @@ class FORK {
         //if ((!empty($this->_process_max))&&($this->_processed >= $this->_process_max)) { $this->error('No more records allowed to processing',1); }
 
         $data = $this->_db->getNext($exclude_ids, $this->_engine, $this->_processed, $this->_process_max, $type, $this->_step);
-        while ((!is_array($data))&&($this->_db->getSentRecords($this->_engine, $type) > 0)) {
-            sleep(1);
-            $data = $this->_db->getNext($exclude_ids, $this->_engine, $this->_processed, $this->_process_max, $type, $this->_step);
-        }
-        if (!is_array($data)) { $this->error('Can not get more data from database',2); }
+        if (!is_array($data)) { $this->error('Can not get more '.$type.' data from database',2); }
 
         $data['waitfile'] = $this->_waitfile_name;
 
@@ -325,18 +321,26 @@ class FORK {
                         };
                         $n_step = ARRAYS::get($thread, ['data','_step_']);
                         if (empty($n_step)) { $n_step = $this->_step; }
+
+
                         $thread['future'] =
                                 $thread['runtime']->run($callfunc, [
                                       'thread' => ['id'=>$i, 'parent'=>getmypid(), 'log'=>FILE::logGetParam(), 'type'=>ARRAYS::get($thread, 'type'), 'step'=>$n_step],
                                       'config' => $this->_config,
                                       'data' => $thread['data']
                                 ]);
-                        FILE::debug($i.' thread - started ('.$thread['data']['id'].'/'.$thread['data']['status'].')',2);
+                        FILE::debug('processing thread: '.$i.' / '.ARRAYS::get($thread, 'type').' thread - started ('.$thread['data']['id'].'/'.$thread['data']['status'].')',2);
                         continue;
                     }
                     if ($thread['future'] === false) { // no need to use this thread anymore
-                        FILE::debug($i." thread - stopped",8);
-                        unset($this->_threads[$i]);
+                        $type = ARRAYS::get($thread, 'type');
+                        if ($this->_db->getSentRecords($this->_engine, $type, $this->_step) > 0) {
+                            sleep(1); //wait 1 sec for new records on each thread
+                        }
+                        else {
+                            FILE::debug($i." thread - stopped",8);
+                            unset($this->_threads[$i]);
+                        }
                         continue;
                     }
                 }

@@ -364,12 +364,12 @@ class SELENIUM {
             $timer_init = 0.0 - microtime(true);
             $this->_driver->get($url);
             $timer = $timer_init + microtime(true);
-            usleep(100000); //0.1 sec for render page
+            usleep(250000); //0.25 sec for render page
             $res['title'] = $this->_driver->getTitle();
         }
         catch (\Exception $ex) {
             $timer = $timer_init + microtime(true);
-            $res['error'] = "url error, screenshoot taken: "$ex->getMessage();
+            $res['error'] = 'url error, screenshoot taken: '.$ex->getMessage();
             $this->screenshoot();
         }
         $res['timer'] = $timer;
@@ -382,28 +382,28 @@ class SELENIUM {
             $element = $this->_driver->findElement(WebDriverBy::xpath($xpath));
             if ((!isset($element))||(empty($element))) { throw new \Exception('No xpath selected button found in the site!'); }
 
-            usleep(100000); //0.1 sec for wait page
+            usleep(250000); //0.25 sec for wait page
             FILE::debug('Clicking on: '.$xpath, 0);
             $timer_init = 0.0 - microtime(true);
             $element->click();
             if ($noError) {
-                $this->_driver->manage()->timeouts()->implicitlyWait(1);
+                $this->_driver->manage()->timeouts()->implicitlyWait(2);
             }
             if (($setValue !== false)&&(!is_array($setValue))) {
-                $this->_driver->manage()->timeouts()->implicitlyWait(1);
+                $this->_driver->manage()->timeouts()->implicitlyWait(1.5);
                 $this->_driver->getKeyboard()->sendKeys($setValue);
                 FILE::debug('Set value: '.$setValue, 0);
             }
             $timer = $timer_init + microtime(true);
             unset($element);
-            usleep(200000); //0.2 sec for wait animation
+            usleep(250000); //0.25 sec for wait animation
 
             $res['title'] = $this->_driver->getTitle();
         }
         catch (\Exception $ex) {
             $timer = null;
             if ($noError) { return []; }
-            $res['error'] = "xpath error, screenshoot taken: ".$ex->getMessage();
+            $res['error'] = 'xpath error, screenshoot taken: '.$ex->getMessage();
             $this->screenshoot();
         }
         $res['timer'] = $timer;

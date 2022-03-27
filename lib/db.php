@@ -156,9 +156,19 @@ class DB {
         return false;
     }
 
-    public function getSentRecords($engine = false, $type=false) {
-        $query = 'SELECT COUNT(id) AS `cnt` FROM `'.$this->_main.'`WHERE (`status` IN (\'sent\',\'received\',\'processed\'))';
-        if ((!empty($type))&&(!empty($engine))&&($engine == 'selenium')) { $query .= ' AND (`engine` = \''.$type.'\')'; }
+    public function getSentRecords($engine = false, $type=false, $step=false) {
+        if ($step == 'new') { return 0; }
+
+        $query = 'SELECT COUNT(id) AS `cnt` FROM `'.$this->_main.'`WHERE (`status` IN (';
+        switch ($step) {
+            case 'received':  $query .= '\'sent\',\'received\''; break;
+            default: $query .= '\'sent\',\'received\',\'processed\''; break;
+        }
+        $query .= '))';
+        if ((empty($step))&&(!empty($type))&&(!empty($engine))&&($engine == 'selenium')) {
+            $query .= ' AND (`engine` = \''.$type.'\')';
+        }
+
         $res = $this->_link->query($query);
         if (empty($res)) { return false; }
         $ret = $res->fetch_assoc();

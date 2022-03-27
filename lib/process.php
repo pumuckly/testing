@@ -111,13 +111,13 @@ final class PROCESS {
                 $_status = $db->getField($record_id, 'status');
                 if (!empty($_status)) { $status = $_status; }
                 $status = $db->getNextStatus($status);
-                $db->update($record_id, ['status'=>$status]);
-
+                if (!empty($status)) { $db->update($record_id, ['status'=>$status]); }
+                else { FILE::debug($record_id.' status can not set to NULL. Last status was: '.$_status,3); }
                 $terminate = true;
             }
             catch (\Exception $ex) {
                 if (isset($params)) { unset($params); }
-                FILE::debug('Processing job error. Thread: '.$thread_id.' Error: '.$ex->getMessage().' - '.memory_get_usage(true),4);
+                FILE::debug('Processing job error: '.$record_id.'. Thread: '.$thread_id.' / '.$thread_type.' -  Error: '.$ex->getMessage().' - '.memory_get_usage(true),4);
                 $terminate = true;
             }
         }
@@ -286,7 +286,7 @@ final class PROCESS {
                 if (self::$_debug) { FILE::debug('step submit fields: '.$id, 0); }
                 usleep(500000); //wait shortly (0.5s) for animations
                 $proc = $engine->clickXpath($submit);
-                if (!empty($wait)) { $engine->wait($wait, 1); }
+                if (!empty($wait)) { $engine->wait($wait, 2); }
             }
             elseif (!empty($dl_xpath)) {
                 if (self::$_debug) { FILE::debug('step download: '.$id, 0); }
