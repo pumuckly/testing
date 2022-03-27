@@ -98,7 +98,8 @@ class IMAP {
 
     protected function close() {
        if ($this->isCon(false)) {
-            imap_close($this->_link);
+            try { imap_close($this->_link); }
+            catch (\Exception $ex) {}
         }
         unset($this->_link);
         $this->_link = false;
@@ -181,6 +182,7 @@ class IMAP {
     public function check() {
         if (!$this->isCon()) { return false; }
         $this->_process_error = false;
+        $changed = false;
         try {
             $emails = imap_search($this->_link, 'UNSEEN FROM "'.$this->_sender.'"');
             $lerror = imap_last_error();
@@ -188,7 +190,6 @@ class IMAP {
             if (empty($emails)) { return false; }
 
             rsort($emails);
-            $changed = false;
             if (count($emails) > 25) { FILE::debug('Found more than 25 emails. Total: '.count($emails),3); }
 
             foreach ($emails as $mail_id) {
@@ -274,11 +275,17 @@ class IMAP {
                 imap_mail_move($this->_link, $mail_id, 'processed');
                 $changed = true;
                 FILE::debug('email processed: from: '.$from.'; to: '.$to.'; subject: '.$subject_key.'; code: '.$code.'; arrived: '.$time.'; link: '.$link, 0);
+                print 'email processed: from: '.$from.'; to: '.$to.'; subject: '.$subject_key.'; code: '.$code.'; arrived: '.$time.'; link: '.$link."\n";
             }
         }
         catch (\Exception $ex) {
             $this->_process_error = $ex->getMessage();
             FILE::debug('Mail processing error: '.$this->_process_error,5);
+            if (preg_match("/IMAP connection lost/", $this->_process_error)) {
+                $this->close();
+            } else {
+                print $this->_process_error."\n";
+            }
         }
 
         try {

@@ -16,6 +16,7 @@ use Facebook\WebDriver\WebDriverKeys;
 class SELENIUM {
 
     private $_server = false;
+    private $_proxy = false;
     private $_types = [];
 
     private $_driver = null;
@@ -37,8 +38,9 @@ class SELENIUM {
         }
         if ((!empty($type_key))&&(!array_key_exists($type_key, $this->_types))) { $type_key = false; }
 
-        $this->_server = ARRAYS::get($this->_types, $type_key);
+        $this->_server = ARRAYS::get($this->_types, [$type_key,'server']);
         if (empty($this->_server)) { throw new \Exception('Can not setup Selenium server URL'); }
+        $this->_proxy = ARRAYS::get($this->_types, [$type_key,'proxy']);
 
         $this->_self_signed = (!empty(ARRAYS::get($conf, 'selfsigned'))) ? true : false;
         $base_dir = ARRAYS::get($conf, 'basedir');
@@ -75,8 +77,9 @@ class SELENIUM {
         $type = $this->_types[$type_idx];
         if ((!empty($type_key))&&(array_key_exists($type_key, $this->_types))) { $type = $type_key; }
 
-        $this->_server = ARRAYS::get($this->_types, $type);
+        $this->_server = ARRAYS::get($this->_types, [$type,'server']);
         if (empty($this->_server)) { throw new \Exception('Can not setup Selenium server URL fot type: '.$type); }
+        $this->_proxy = ARRAYS::get($this->_types, [$type,'proxy']);
 
         return $type;
     }
@@ -131,6 +134,13 @@ class SELENIUM {
             $options->addArguments(['acceptInsecureCerts=true']);
         }
 
+        $proxy_host = ARRAYS::get($this->_proxy, 'host');
+        $proxy_port = ARRAYS::get($this->_proxy, 'port');
+        if (empty($proxy_port)) { $proxy_port = 3128; }
+        if ((!empty($proxy_host))&&(!empty($proxy_port))) {
+            $options->addArguments(['--proxy-server='.$proxy_host.':'.$proxy_port]);
+        }
+
         $desiredCapabilities = DesiredCapabilities::chrome();
         $desiredCapabilities->setCapability(ChromeOptions::CAPABILITY, $options);
         unset($options);
@@ -157,6 +167,15 @@ class SELENIUM {
         $profile->setPreference('browser.cache.offline.enable', false);
         //$profile->setPreference('browser.cache.memory.enable', false);
 
+        $proxy_host = ARRAYS::get($this->_proxy, 'host');
+        $proxy_port = ARRAYS::get($this->_proxy, 'port');
+        if (empty($proxy_port)) { $proxy_port = 3128; }
+        if ((!empty($proxy_host))&&(!empty($proxy_port))) {
+            $profile->setPreference('network.proxy.type', 1);
+            $profile->setPreference('network.proxy.http'. $proxy_host);
+            $profile->setPreference('network.proxy.http_port',$proxy_port);
+        }
+
         $options = new FirefoxOptions();
         //$options->addArguments(['-headless']);
         $options->addArguments(['--remote-debugging-port=9222']);
@@ -175,11 +194,15 @@ class SELENIUM {
         return $desiredCapabilities;
     }
 
-    protected function initDriver($type, $base_dir = '') {
+    protected function initDriver($type_id, $base_dir = '') {
         try {
             if (empty($this->_init_session)) {
                 $this->closeDriver();
             }
+
+            $type = false;
+            if (preg_match("/^(firefox|chrome)/", $type_id, $tm)) { $type = ARRAYS::get($tm,1); }
+            if (empty($type)) {  throw new \Exception('Unable to found website engine in key: '.$type_id); }
 
             $this->initBaseDir($base_dir);
 
@@ -213,7 +236,7 @@ class SELENIUM {
 
                 if (empty($desiredCapabilities)) { throw new \Exception('Unknown Selenium engine: '.$type); }
 
-                $this->_driver = RemoteWebDriver::create($this->_server, $desiredCapabilities, 30000);
+                $this->_driver = RemoteWebDriver::create($this->_server, $desiredCapabilities, 45000);
             }
             if ((!is_object($this->_driver))||(empty($this->_driver->getSessionID()))) {
                 throw new \Exception('Unable to create/load Seleniun test environment ('.$type.')');
